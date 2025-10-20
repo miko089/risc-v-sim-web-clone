@@ -5,7 +5,7 @@ Web version of [risc-v-sim](https://github.com/nup-csai/risc-v-sim)
 ## How to run
 ```bash
 docker build -t meow .
-docker run -d --rm -p 3000:300 -t meow
+docker run -d --rm -p 3000:3000 -t meow
 ```
 
 ## How to use
