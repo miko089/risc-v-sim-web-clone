@@ -12,6 +12,7 @@ class RISCVSimulator {
         form.addEventListener('submit', (e) => this.handleSubmit(e));
         codeTextarea.addEventListener('input', () => this.updateLineNumbers());
         codeTextarea.addEventListener('scroll', () => this.syncLineNumbers());
+        codeTextarea.addEventListener('keydown', (e) => this.handleTabKey(e));
         clearBtn.addEventListener('click', () => this.clearForm());
     }
 
@@ -31,6 +32,20 @@ class RISCVSimulator {
         const textarea = document.getElementById('code');
         const lineNumbers = document.querySelector('.line-numbers');
         lineNumbers.scrollTop = textarea.scrollTop;
+    }
+
+    handleTabKey(e) {
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            const textarea = e.target;
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+            
+            textarea.value = textarea.value.substring(0, start) + '    ' + textarea.value.substring(end);
+            textarea.selectionStart = textarea.selectionEnd = start + 4;
+            
+            this.updateLineNumbers();
+        }
     }
 
     async handleSubmit(e) {
