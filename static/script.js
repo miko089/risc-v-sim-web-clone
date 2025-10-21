@@ -217,18 +217,6 @@ class ResultsPage {
         } else if (instruction.Xor && Array.isArray(instruction.Xor)) {
             const [rd, rs1, rs2] = instruction.Xor;
             instructionText = `xor x${rd}, x${rs1}, x${rs2}`;
-        } else {
-            // If unknown format, try to display as-is
-            const keys = Object.keys(instruction);
-            if (keys.length > 0) {
-                const key = keys[0];
-                const value = instruction[key];
-                if (Array.isArray(value)) {
-                    instructionText = `${key.toLowerCase()} ${value.join(', ')}`;
-                } else {
-                    instructionText = `${key}: ${JSON.stringify(value)}`;
-                }
-            }
         }
 
         return `
