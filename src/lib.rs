@@ -8,7 +8,7 @@ use axum::{
 };
 use std::path::Path;
 use std::time::Duration;
-use tempfile::tempdir;
+use tempfile::{tempdir, TempDir};
 use tokio::fs;
 use tokio::process::Command;
 use tokio::time::timeout;
@@ -21,7 +21,7 @@ pub async fn compile_s_to_elf(
     s_content: &[u8],
     as_binary: impl AsRef<Path>,
     ld_binary: impl AsRef<Path>,
-) -> Result<Vec<u8>> {
+) -> Result<TempDir> {
     let dir = tempdir()?;
     let s_path = dir.path().join("input.s");
     let o_path = dir.path().join("output.o");
@@ -58,18 +58,15 @@ pub async fn compile_s_to_elf(
         return Err(anyhow::anyhow!("Linker error:\n{}\n{}", stderr, stdout));
     }
 
-    let elf_content = fs::read(&elf_path).await?;
-    Ok(elf_content)
+    Ok(dir)
 }
 
 pub async fn run_simulator(
-    elf_content: &[u8],
+    dir_with_elf: TempDir,
     ticks: u32,
     simulator_binary: impl AsRef<Path>,
 ) -> Result<(String, String)> {
-    let dir = tempdir()?;
-    let elf_path = dir.path().join("sim_input.elf");
-    fs::write(&elf_path, elf_content).await?;
+    let elf_path = dir_with_elf.path().join("output.elf");
 
     let output = Command::new(simulator_binary.as_ref())
         .arg("--ticks")
@@ -134,7 +131,7 @@ pub async fn submit_handler(mut multipart: Multipart) -> Result<Response, Status
 
     let (stdout, stderr) = match timeout(
         Duration::from_secs(10),
-        run_simulator(&elf_content, ticks, &simulator_binary),
+        run_simulator(elf_content, ticks, &simulator_binary),
     )
     .await
     {
