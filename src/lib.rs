@@ -3,7 +3,7 @@ use axum::{
     Router,
     extract::Multipart,
     http::StatusCode,
-    response::Response,
+    response::Json,
     routing::{get, post},
 };
 use std::path::Path;
@@ -83,7 +83,7 @@ pub async fn run_simulator(
     Ok((stdout, stderr))
 }
 
-pub async fn submit_handler(mut multipart: Multipart) -> Result<Response, StatusCode> {
+pub async fn submit_handler(mut multipart: Multipart) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
     let as_binary = std::env::var("AS_BINARY").unwrap_or_else(|_| "riscv64-elf-as".to_string());
     let ld_binary = std::env::var("LD_BINARY").unwrap_or_else(|_| "riscv64-elf-ld".to_string());
     let simulator_binary =
@@ -118,11 +118,9 @@ pub async fn submit_handler(mut multipart: Multipart) -> Result<Response, Status
     {
         Ok(Ok(elf)) => elf,
         Ok(Err(compilation_error)) => {
-            return Ok(Response::builder()
-                .status(StatusCode::BAD_REQUEST)
-                .header("Content-Type", "text/plain")
-                .body(compilation_error.to_string().into())
-                .unwrap());
+            return Ok((StatusCode::BAD_REQUEST, Json(serde_json::json!({
+                "error": compilation_error.to_string()
+            }))));
         }
         Err(_) => {
             return Err(StatusCode::REQUEST_TIMEOUT);
@@ -137,11 +135,9 @@ pub async fn submit_handler(mut multipart: Multipart) -> Result<Response, Status
     {
         Ok(Ok(result)) => result,
         Ok(Err(sim_error)) => {
-            return Ok(Response::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .header("Content-Type", "text/plain")
-                .body(sim_error.to_string().into())
-                .unwrap());
+            return Ok((StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+                "error": sim_error.to_string()
+            }))));
         }
         Err(_) => {
             return Err(StatusCode::REQUEST_TIMEOUT);
@@ -149,22 +145,18 @@ pub async fn submit_handler(mut multipart: Multipart) -> Result<Response, Status
     };
 
     if !stderr.is_empty() {
-        return Ok(Response::builder()
-            .status(StatusCode::BAD_REQUEST)
-            .header("Content-Type", "text/plain")
-            .body(stderr.into())
-            .unwrap());
+        return Ok((StatusCode::BAD_REQUEST, Json(serde_json::json!({
+            "error": stderr
+        }))));
     }
 
     match serde_json::from_str::<serde_json::Value>(&stdout) {
-        Ok(_) => Ok(Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", "application/json")
-            .body(stdout.into())
-            .unwrap()),
+        Ok(json) => Ok((StatusCode::OK, Json(json))),
         Err(_) => {
             eprintln!("Invalid JSON output: {}", stdout);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
+            Ok((StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+                "error": "Invalid JSON output from simulator"
+            }))))
         }
     }
 }
