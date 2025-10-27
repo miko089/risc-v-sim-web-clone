@@ -89,26 +89,26 @@ pub async fn submit_handler(mut multipart: Multipart) -> Result<Response, Status
     let simulator_binary =
         std::env::var("SIMULATOR_BINARY").unwrap_or_else(|_| "simulator".to_string());
 
-    let ticks_field = multipart
-        .next_field()
-        .await
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
-    let ticks_str = ticks_field
-        .ok_or(StatusCode::BAD_REQUEST)?
-        .text()
-        .await
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
-    let ticks: u32 = ticks_str.parse().map_err(|_| StatusCode::BAD_REQUEST)?;
+    let mut ticks: Option<u32> = None;
+    let mut file_content: Option<bytes::Bytes> = None;
 
-    let file_field = multipart
-        .next_field()
-        .await
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
-    let file_content = file_field
-        .ok_or(StatusCode::BAD_REQUEST)?
-        .bytes()
-        .await
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    while let Some(field) = multipart.next_field().await.map_err(|_| StatusCode::BAD_REQUEST)? {
+        let name = field.name().ok_or(StatusCode::BAD_REQUEST)?;
+        
+        match name {
+            "ticks" => {
+                let ticks_str = field.text().await.map_err(|_| StatusCode::BAD_REQUEST)?;
+                ticks = Some(ticks_str.parse().map_err(|_| StatusCode::BAD_REQUEST)?);
+            }
+            "file" => {
+                file_content = Some(field.bytes().await.map_err(|_| StatusCode::BAD_REQUEST)?);
+            }
+            _ => return Err(StatusCode::BAD_REQUEST),
+        }
+    }
+
+    let ticks = ticks.ok_or(StatusCode::BAD_REQUEST)?;
+    let file_content = file_content.ok_or(StatusCode::BAD_REQUEST)?;
 
     let elf_content = match timeout(
         Duration::from_secs(5),
