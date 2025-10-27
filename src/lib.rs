@@ -8,7 +8,7 @@ use axum::{
 };
 use std::path::Path;
 use std::time::Duration;
-use tempfile::{tempdir, TempDir};
+use tempfile::{TempDir, tempdir};
 use tokio::fs;
 use tokio::process::Command;
 use tokio::time::timeout;
@@ -83,7 +83,9 @@ pub async fn run_simulator(
     Ok((stdout, stderr))
 }
 
-pub async fn submit_handler(mut multipart: Multipart) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
+pub async fn submit_handler(
+    mut multipart: Multipart,
+) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
     let as_binary = std::env::var("AS_BINARY").unwrap_or_else(|_| "riscv64-elf-as".to_string());
     let ld_binary = std::env::var("LD_BINARY").unwrap_or_else(|_| "riscv64-elf-ld".to_string());
     let simulator_binary =
@@ -92,9 +94,13 @@ pub async fn submit_handler(mut multipart: Multipart) -> Result<(StatusCode, Jso
     let mut ticks: Option<u32> = None;
     let mut file_content: Option<bytes::Bytes> = None;
 
-    while let Some(field) = multipart.next_field().await.map_err(|_| StatusCode::BAD_REQUEST)? {
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|_| StatusCode::BAD_REQUEST)?
+    {
         let name = field.name().ok_or(StatusCode::BAD_REQUEST)?;
-        
+
         match name {
             "ticks" => {
                 let ticks_str = field.text().await.map_err(|_| StatusCode::BAD_REQUEST)?;
@@ -118,9 +124,12 @@ pub async fn submit_handler(mut multipart: Multipart) -> Result<(StatusCode, Jso
     {
         Ok(Ok(elf)) => elf,
         Ok(Err(compilation_error)) => {
-            return Ok((StatusCode::BAD_REQUEST, Json(serde_json::json!({
-                "error": compilation_error.to_string()
-            }))));
+            return Ok((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": compilation_error.to_string()
+                })),
+            ));
         }
         Err(_) => {
             return Err(StatusCode::REQUEST_TIMEOUT);
@@ -135,9 +144,12 @@ pub async fn submit_handler(mut multipart: Multipart) -> Result<(StatusCode, Jso
     {
         Ok(Ok(result)) => result,
         Ok(Err(sim_error)) => {
-            return Ok((StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
-                "error": sim_error.to_string()
-            }))));
+            return Ok((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": sim_error.to_string()
+                })),
+            ));
         }
         Err(_) => {
             return Err(StatusCode::REQUEST_TIMEOUT);
@@ -145,18 +157,24 @@ pub async fn submit_handler(mut multipart: Multipart) -> Result<(StatusCode, Jso
     };
 
     if !stderr.is_empty() {
-        return Ok((StatusCode::BAD_REQUEST, Json(serde_json::json!({
-            "error": stderr
-        }))));
+        return Ok((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": stderr
+            })),
+        ));
     }
 
     match serde_json::from_str::<serde_json::Value>(&stdout) {
         Ok(json) => Ok((StatusCode::OK, Json(json))),
         Err(_) => {
             eprintln!("Invalid JSON output: {}", stdout);
-            Ok((StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
-                "error": "Invalid JSON output from simulator"
-            }))))
+            Ok((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Invalid JSON output from simulator"
+                })),
+            ))
         }
     }
 }
