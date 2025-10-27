@@ -33,6 +33,7 @@ pub async fn compile_s_to_elf(
         .arg(&s_path)
         .arg("-o")
         .arg(&o_path)
+        .kill_on_drop(true)
         .output()
         .await?;
 
@@ -47,6 +48,7 @@ pub async fn compile_s_to_elf(
         .arg("-Ttext=0x80000000")
         .arg("-o")
         .arg(&elf_path)
+        .kill_on_drop(true)
         .output()
         .await?;
 
@@ -74,6 +76,7 @@ pub async fn run_simulator(
         .arg(ticks.to_string())
         .arg("--path")
         .arg(&elf_path)
+        .kill_on_drop(true)
         .output()
         .await?;
 
