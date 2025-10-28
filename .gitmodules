@@ -1,0 +1,3 @@
+[submodule "risc-v-sim"]
+	path = risc-v-sim
+	url = git@github.com:nup-csai/risc-v-sim.git
