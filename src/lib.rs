@@ -3,7 +3,7 @@ use axum::{
     Router,
     extract::{Multipart, multipart::Field},
     http::StatusCode,
-    response::{Html, Json, Response},
+    response::{Html, Json},
     routing::{get, post},
 };
 use std::fs as std_fs;
