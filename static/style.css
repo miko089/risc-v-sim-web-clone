@@ -110,7 +110,15 @@ textarea:focus {
     user-select: none;
     pointer-events: none;
     white-space: pre;
-    overflow: hidden;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: none;
+    height: 100%;
+    box-sizing: border-box;
+}
+
+.line-numbers::-webkit-scrollbar {
+    display: none;
 }
 
 .form-actions {
@@ -273,6 +281,43 @@ button {
     border-left: 4px solid #667eea;
 }
 
+.instruction-meta {
+    margin-top: 12px;
+    font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.instruction-meta table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.instruction-meta th,
+.instruction-meta td {
+    padding: 8px 10px;
+    border-bottom: 1px solid #f1f3f5;
+    vertical-align: top;
+}
+
+.instruction-meta th {
+    width: 140px;
+    background: #f8f9fa;
+    text-align: left;
+    font-weight: 600;
+    color: #495057;
+}
+
+.instruction-meta pre {
+    margin: 0;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 .registers-container {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -340,6 +385,60 @@ button {
 .register-changed .register-value {
     color: #856404;
     font-weight: 600;
+}
+
+.step-flags {
+    margin-top: 20px;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #fff;
+}
+
+.step-flags h4 {
+    margin: 0;
+    padding: 12px 16px;
+    background: #f1f3f5;
+    border-bottom: 1px solid #dee2e6;
+    font-size: 16px;
+    font-weight: 600;
+    color: #343a40;
+}
+
+.flags-table-wrapper {
+    overflow-x: auto;
+}
+
+.flags-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    background: #fff;
+}
+
+.flags-table th,
+.flags-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #f1f3f5;
+    text-align: left;
+    vertical-align: top;
+}
+
+.flags-table th {
+    background: #f8f9fa;
+    font-weight: 600;
+    color: #495057;
+}
+
+.flags-table tr:last-child td {
+    border-bottom: none;
+}
+
+.flags-table pre {
+    margin: 0;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
 .expand-icon {
