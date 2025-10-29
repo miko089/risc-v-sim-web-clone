@@ -1,0 +1,18 @@
+name: Image Health
+
+on: 
+  pull_request:
+    branches: ["master"]
+
+jobs:
+  img-check:
+    runs-on: ubuntu-24.04  
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+      - run: docker build -t risc-v-sim-web-test .
+      - run: |
+          docker run --rm -d -p 3000:3000 risc-v-sim-web-test
+          sleep 5
+          curl -f http://localhost:3000/health || exit 1

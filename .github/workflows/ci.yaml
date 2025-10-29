@@ -64,15 +64,3 @@ jobs:
           key: ci-doc-check-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ci-doc-check-cargo-
       - run: cargo doc --no-deps --document-private-items
-  docker-build:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build Docker image
-        run: docker build -t risc-v-sim-web-test .
-      - name: Test Docker container
-        run: |
-          docker run --rm -d -p 3000:3000 risc-v-sim-web-test
-          sleep 5
-          curl -f http://localhost:3000/health || exit 1
-          docker stop $(docker ps -q)
