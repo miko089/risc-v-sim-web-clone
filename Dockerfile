@@ -6,17 +6,15 @@ RUN apt-get update && apt-get install -y curl && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 ENV PATH="/root/.cargo/bin:$PATH"
 
-# Build risc-v-sim
-WORKDIR /tmp
-RUN git clone https://github.com/nup-csai/risc-v-sim.git
-WORKDIR /tmp/risc-v-sim
+COPY . /app
+
+WORKDIR /app/risc-v-sim
 RUN cargo build --release
 RUN cp target/release/risc-v-sim /usr/local/bin/
 RUN risc-v-sim --help
 
 # Build risc-v-sim-web
 WORKDIR /app
-COPY . .
 RUN cargo build --release
 
 # Set environment variables
