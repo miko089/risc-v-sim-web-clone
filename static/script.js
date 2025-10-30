@@ -76,10 +76,7 @@ class RISCVSimulator {
         
         const formData = new FormData(e.target);
         const ticks = formData.get('ticks');
-        let code = formData.get('code');
-        if (code === null || code === undefined) {
-            code = formData.get('file');
-        }
+        let code = formData.get('file');
 
         this.showLoading(true);
         this.hideError();
@@ -142,10 +139,6 @@ class RISCVSimulator {
     }
 
     clearForm() {
-        const textarea = this.getCodeTextarea();
-        if (textarea) {
-            textarea.value = '.global _start\n_start:\n    li a0, 10\n    li a1, 20\n    add a2, a0, a1\n    sub a3, a2, a0\n    addi a4, a1, 5';
-        }
         const ticksInput = document.getElementById('ticks');
         if (ticksInput) {
             ticksInput.value = '10';
