@@ -12,6 +12,8 @@ use tempfile::{TempDir, tempdir};
 use tokio::fs;
 use tokio::process::Command;
 use tokio::time::timeout;
+use tower::ServiceBuilder;
+use tower_http::services::ServeDir;
 use tracing::{error, info};
 
 pub async fn health_handler() -> &'static str {
@@ -221,8 +223,14 @@ pub async fn submit_handler(multipart: Multipart) -> (StatusCode, Json<serde_jso
 
 pub fn create_app() -> Router {
     Router::new()
-        .route("/health", get(health_handler))
-        .route("/submit", post(submit_handler))
+        .nest(
+            "/api",
+            Router::new()
+                .route("/health", get(health_handler))
+                .route("/submit", post(submit_handler)),
+        )
+        .fallback_service(ServeDir::new("static"))
+        .layer(ServiceBuilder::new().layer(tower_http::cors::CorsLayer::permissive()))
 }
 
 #[cfg(test)]
