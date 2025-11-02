@@ -1,7 +1,7 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use axum::{
     Router,
-    extract::Multipart,
+    extract::{Multipart, multipart::Field},
     http::StatusCode,
     response::Json,
     routing::{get, post},
@@ -86,38 +86,52 @@ pub async fn run_simulator(
     Ok((stdout, stderr))
 }
 
-pub async fn submit_handler(
-    mut multipart: Multipart,
-) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
+pub async fn parse_submit_inputs(mut multipart: Multipart) -> Result<(u32, bytes::Bytes)> {
+    let mut ticks: Option<u32> = None;
+    let mut file: Option<bytes::Bytes> = None;
+
+    while let Some(field) = multipart.next_field().await? {
+        let Some(name) = field.name() else {
+            bail!("field without name")
+        };
+        match name {
+            "ticks" => ticks = Some(ticks_from_field(field).await.context("parsing ticks")?),
+            "file" => file = Some(field.bytes().await.context("parsing file")?),
+            name => bail!("unknown field {name:?}"),
+        }
+    }
+
+    let Some(ticks) = ticks else {
+        bail!("ticks field not set")
+    };
+    let Some(file) = file else {
+        bail!("file field not set")
+    };
+    Ok((ticks, file))
+}
+
+async fn ticks_from_field(field: Field<'_>) -> Result<u32> {
+    let ticks_str = field.text().await?;
+    Ok(ticks_str.parse()?)
+}
+
+pub async fn submit_handler(multipart: Multipart) -> (StatusCode, Json<serde_json::Value>) {
     let as_binary = std::env::var("AS_BINARY").unwrap_or_else(|_| "riscv64-elf-as".to_string());
     let ld_binary = std::env::var("LD_BINARY").unwrap_or_else(|_| "riscv64-elf-ld".to_string());
     let simulator_binary =
         std::env::var("SIMULATOR_BINARY").unwrap_or_else(|_| "simulator".to_string());
 
-    let mut ticks: Option<u32> = None;
-    let mut file_content: Option<bytes::Bytes> = None;
-
-    while let Some(field) = multipart
-        .next_field()
-        .await
-        .map_err(|_| StatusCode::BAD_REQUEST)?
-    {
-        let name = field.name().ok_or(StatusCode::BAD_REQUEST)?;
-
-        match name {
-            "ticks" => {
-                let ticks_str = field.text().await.map_err(|_| StatusCode::BAD_REQUEST)?;
-                ticks = Some(ticks_str.parse().map_err(|_| StatusCode::BAD_REQUEST)?);
-            }
-            "file" => {
-                file_content = Some(field.bytes().await.map_err(|_| StatusCode::BAD_REQUEST)?);
-            }
-            _ => return Err(StatusCode::BAD_REQUEST),
+    let (ticks, file_content) = match parse_submit_inputs(multipart).await.context("parse input") {
+        Ok(x) => x,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": format!("{e:#}"),
+                })),
+            );
         }
-    }
-
-    let ticks = ticks.ok_or(StatusCode::BAD_REQUEST)?;
-    let file_content = file_content.ok_or(StatusCode::BAD_REQUEST)?;
+    };
 
     let elf_content = match timeout(
         Duration::from_secs(5),
@@ -127,15 +141,20 @@ pub async fn submit_handler(
     {
         Ok(Ok(elf)) => elf,
         Ok(Err(compilation_error)) => {
-            return Ok((
+            return (
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({
-                    "error": compilation_error.to_string()
+                    "error": format!("{compilation_error:#}"), 
                 })),
-            ));
+            );
         }
         Err(_) => {
-            return Err(StatusCode::REQUEST_TIMEOUT);
+            return (
+                StatusCode::REQUEST_TIMEOUT,
+                Json(serde_json::json!({
+                    "error": "compilation timed out",
+                })),
+            );
         }
     };
 
@@ -147,38 +166,40 @@ pub async fn submit_handler(
     {
         Ok(Ok(result)) => result,
         Ok(Err(sim_error)) => {
-            return Ok((
+            return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({
                     "error": sim_error.to_string()
                 })),
-            ));
+            );
         }
         Err(_) => {
-            return Err(StatusCode::REQUEST_TIMEOUT);
+            return (
+                StatusCode::REQUEST_TIMEOUT,
+                Json(serde_json::json!({
+                    "error": "simulation timed out",
+                })),
+            );
         }
     };
 
     if !stderr.is_empty() {
-        return Ok((
+        return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({
                 "error": stderr
             })),
-        ));
+        );
     }
 
     match serde_json::from_str::<serde_json::Value>(&stdout) {
-        Ok(json) => Ok((StatusCode::OK, Json(json))),
-        Err(_) => {
-            eprintln!("Invalid JSON output: {}", stdout);
-            Ok((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "error": "Invalid JSON output from simulator"
-                })),
-            ))
-        }
+        Ok(json) => (StatusCode::OK, Json(json)),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": "Invalid JSON output from simulator"
+            })),
+        ),
     }
 }
 
