@@ -15,4 +15,4 @@ jobs:
       - run: |
           docker run --rm -d -p 3000:3000 risc-v-sim-web-test
           sleep 5
-          curl -f http://localhost:3000/health || exit 1
+          curl -f http://localhost:3000/api/health || exit 1
