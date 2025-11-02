@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use axum::{
     Router,
     extract::Multipart,
@@ -35,7 +35,8 @@ pub async fn compile_s_to_elf(
         .arg(&o_path)
         .kill_on_drop(true)
         .output()
-        .await?;
+        .await
+        .context("copmiling")?;
 
     if !as_output.status.success() {
         let stderr = String::from_utf8_lossy(&as_output.stderr);
@@ -50,7 +51,8 @@ pub async fn compile_s_to_elf(
         .arg(&elf_path)
         .kill_on_drop(true)
         .output()
-        .await?;
+        .await
+        .context("linking")?;
 
     if !ld_output.status.success() {
         let stderr = String::from_utf8_lossy(&ld_output.stderr);
@@ -75,7 +77,8 @@ pub async fn run_simulator(
         .arg(&elf_path)
         .kill_on_drop(true)
         .output()
-        .await?;
+        .await
+        .context("simulating")?;
 
     let stdout = String::from_utf8(output.stdout)?;
     let stderr = String::from_utf8(output.stderr)?;
