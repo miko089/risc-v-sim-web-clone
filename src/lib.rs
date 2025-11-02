@@ -12,6 +12,7 @@ use tempfile::{TempDir, tempdir};
 use tokio::fs;
 use tokio::process::Command;
 use tokio::time::timeout;
+use tracing::{error, info};
 
 pub async fn health_handler() -> &'static str {
     "Ok"
@@ -27,8 +28,10 @@ pub async fn compile_s_to_elf(
     let o_path = dir.path().join("output.o");
     let elf_path = dir.path().join("output.elf");
 
+    info!("Writing program to {s_path:?}");
     fs::write(&s_path, s_content).await?;
 
+    info!("Compiling {s_path:?} to object file {o_path:?}");
     let as_output = Command::new(as_binary.as_ref())
         .arg(&s_path)
         .arg("-o")
@@ -44,6 +47,7 @@ pub async fn compile_s_to_elf(
         return Err(anyhow::anyhow!("Assembler error:\n{}\n{}", stderr, stdout));
     }
 
+    info!("Linking {o_path:?} to elf {elf_path:?}");
     let ld_output = Command::new(ld_binary.as_ref())
         .arg(&o_path)
         .arg("-Ttext=0x80000000")
@@ -60,6 +64,7 @@ pub async fn compile_s_to_elf(
         return Err(anyhow::anyhow!("Linker error:\n{}\n{}", stderr, stdout));
     }
 
+    info!("Elf ready");
     Ok(dir)
 }
 
@@ -69,6 +74,7 @@ pub async fn run_simulator(
     simulator_binary: impl AsRef<Path>,
 ) -> Result<String> {
     let elf_path = dir_with_elf.path().join("output.elf");
+    info!("Simulating the program at {elf_path:?}");
 
     let output = Command::new(simulator_binary.as_ref())
         .arg("--ticks")
@@ -89,6 +95,7 @@ pub async fn run_simulator(
         bail!("simulator failed: {stderr}");
     }
 
+    info!("Simulating has been successful");
     Ok(stdout)
 }
 
@@ -130,6 +137,7 @@ pub async fn submit_handler(multipart: Multipart) -> (StatusCode, Json<serde_jso
     let (ticks, file_content) = match parse_submit_inputs(multipart).await.context("parse input") {
         Ok(x) => x,
         Err(e) => {
+            info!("Bad request: {e:#}");
             return (
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({
@@ -138,6 +146,10 @@ pub async fn submit_handler(multipart: Multipart) -> (StatusCode, Json<serde_jso
             );
         }
     };
+    info!(
+        "Received {} bytes of program code to run for {ticks} ticks",
+        file_content.len()
+    );
 
     let elf_content = match timeout(
         Duration::from_secs(5),
@@ -147,6 +159,7 @@ pub async fn submit_handler(multipart: Multipart) -> (StatusCode, Json<serde_jso
     {
         Ok(Ok(elf)) => elf,
         Ok(Err(compilation_error)) => {
+            error!("Compilation failed: {compilation_error:#}");
             return (
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({
@@ -155,6 +168,7 @@ pub async fn submit_handler(multipart: Multipart) -> (StatusCode, Json<serde_jso
             );
         }
         Err(_) => {
+            error!("Compilation timed out");
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({
@@ -172,6 +186,7 @@ pub async fn submit_handler(multipart: Multipart) -> (StatusCode, Json<serde_jso
     {
         Ok(Ok(result)) => result,
         Ok(Err(sim_error)) => {
+            error!("Simulation failed {sim_error:#}");
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({
@@ -180,6 +195,7 @@ pub async fn submit_handler(multipart: Multipart) -> (StatusCode, Json<serde_jso
             );
         }
         Err(_) => {
+            error!("Simulation timed out");
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({
@@ -191,12 +207,15 @@ pub async fn submit_handler(multipart: Multipart) -> (StatusCode, Json<serde_jso
 
     match serde_json::from_str::<serde_json::Value>(&stdout) {
         Ok(json) => (StatusCode::OK, Json(json)),
-        Err(_) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({
-                "error": "Invalid JSON output from simulator"
-            })),
-        ),
+        Err(e) => {
+            error!("Simulator printed malformed JSON: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Invalid JSON output from simulator"
+                })),
+            )
+        }
     }
 }
 
