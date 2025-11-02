@@ -3,10 +3,9 @@ use axum::{
     Router,
     extract::{Multipart, multipart::Field},
     http::StatusCode,
-    response::{Html, Json},
+    response::Json,
     routing::{get, post},
 };
-use std::fs as std_fs;
 use std::path::Path;
 use std::time::Duration;
 use tempfile::{TempDir, tempdir};
@@ -19,22 +18,6 @@ use tracing::{error, info};
 
 pub async fn health_handler() -> &'static str {
     "Ok"
-}
-
-pub async fn index_handler() -> Result<Html<String>, StatusCode> {
-    let content = std_fs::read_to_string("static/index.html").map_err(|e| {
-        eprintln!("Error reading index.html: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-    Ok(Html(content))
-}
-
-pub async fn results_handler() -> Result<Html<String>, StatusCode> {
-    let content = std_fs::read_to_string("static/results.html").map_err(|e| {
-        eprintln!("Error reading results.html: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-    Ok(Html(content))
 }
 
 pub async fn compile_s_to_elf(
@@ -240,9 +223,11 @@ pub async fn submit_handler(multipart: Multipart) -> (StatusCode, Json<serde_jso
 
 pub fn create_app() -> Router {
     Router::new()
-        .nest("/api", Router::new()
-            .route("/health", get(health_handler))
-            .route("/submit", post(submit_handler))
+        .nest(
+            "/api",
+            Router::new()
+                .route("/health", get(health_handler))
+                .route("/submit", post(submit_handler)),
         )
         .fallback_service(ServeDir::new("static"))
         .layer(ServiceBuilder::new().layer(tower_http::cors::CorsLayer::permissive()))

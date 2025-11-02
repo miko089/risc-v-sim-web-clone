@@ -82,7 +82,7 @@ class RISCVSimulator {
         this.hideError();
 
         try {
-            const endpoint = '/submit';
+            const endpoint = '/api/submit';
             
             const response = await fetch(endpoint, {
                 method: 'POST',
@@ -139,6 +139,10 @@ class RISCVSimulator {
     }
 
     clearForm() {
+        const codeArea   = this.getCodeTextarea();
+        if (codeArea) {
+            codeArea.value = "";
+        }
         const ticksInput = document.getElementById('ticks');
         if (ticksInput) {
             ticksInput.value = '10';
