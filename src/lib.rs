@@ -80,8 +80,8 @@ pub async fn run_simulator(
         .await
         .context("simulating")?;
 
-    let stdout = String::from_utf8(output.stdout)?;
-    let stderr = String::from_utf8(output.stderr)?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
     Ok((stdout, stderr))
 }
