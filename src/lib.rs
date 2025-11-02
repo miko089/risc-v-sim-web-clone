@@ -67,7 +67,7 @@ pub async fn run_simulator(
     dir_with_elf: TempDir,
     ticks: u32,
     simulator_binary: impl AsRef<Path>,
-) -> Result<(String, String)> {
+) -> Result<String> {
     let elf_path = dir_with_elf.path().join("output.elf");
 
     let output = Command::new(simulator_binary.as_ref())
@@ -83,7 +83,13 @@ pub async fn run_simulator(
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
-    Ok((stdout, stderr))
+    // FIXME: This will dump simulator logs.
+    //        Not something we actually want to do.
+    if !output.status.success() {
+        bail!("simulator failed: {stderr}");
+    }
+
+    Ok(stdout)
 }
 
 pub async fn parse_submit_inputs(mut multipart: Multipart) -> Result<(u32, bytes::Bytes)> {
@@ -144,7 +150,7 @@ pub async fn submit_handler(multipart: Multipart) -> (StatusCode, Json<serde_jso
             return (
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({
-                    "error": format!("{compilation_error:#}"), 
+                    "error": format!("{compilation_error:#}"),
                 })),
             );
         }
@@ -158,7 +164,7 @@ pub async fn submit_handler(multipart: Multipart) -> (StatusCode, Json<serde_jso
         }
     };
 
-    let (stdout, stderr) = match timeout(
+    let stdout = match timeout(
         Duration::from_secs(10),
         run_simulator(elf_content, ticks, &simulator_binary),
     )
@@ -182,15 +188,6 @@ pub async fn submit_handler(multipart: Multipart) -> (StatusCode, Json<serde_jso
             );
         }
     };
-
-    if !stderr.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": stderr
-            })),
-        );
-    }
 
     match serde_json::from_str::<serde_json::Value>(&stdout) {
         Ok(json) => (StatusCode::OK, Json(json)),
