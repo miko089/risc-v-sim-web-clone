@@ -150,7 +150,7 @@ pub async fn submit_handler(multipart: Multipart) -> (StatusCode, Json<serde_jso
         }
         Err(_) => {
             return (
-                StatusCode::REQUEST_TIMEOUT,
+                StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({
                     "error": "compilation timed out",
                 })),
@@ -175,7 +175,7 @@ pub async fn submit_handler(multipart: Multipart) -> (StatusCode, Json<serde_jso
         }
         Err(_) => {
             return (
-                StatusCode::REQUEST_TIMEOUT,
+                StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({
                     "error": "simulation timed out",
                 })),
