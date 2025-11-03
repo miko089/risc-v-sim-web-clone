@@ -8,13 +8,13 @@ use axum::{
 };
 use std::path::Path;
 use std::time::Duration;
-use tempfile::{TempDir, tempdir};
 use tokio::fs;
 use tokio::process::Command;
 use tokio::time::timeout;
 use tower::ServiceBuilder;
 use tower_http::services::ServeDir;
 use tracing::{error, info};
+use uuid::Uuid;
 
 pub async fn health_handler() -> &'static str {
     "Ok"
@@ -22,13 +22,14 @@ pub async fn health_handler() -> &'static str {
 
 pub async fn compile_s_to_elf(
     s_content: &[u8],
-    as_binary: impl AsRef<Path>,
-    ld_binary: impl AsRef<Path>,
-) -> Result<TempDir> {
-    let dir = tempdir()?;
-    let s_path = dir.path().join("input.s");
-    let o_path = dir.path().join("output.o");
-    let elf_path = dir.path().join("output.elf");
+    submission_dir: impl AsRef<Path>,
+    as_binary:      impl AsRef<Path>,
+    ld_binary:      impl AsRef<Path>,
+) -> Result<()> {
+    let dir = submission_dir.as_ref();
+    let s_path = dir.join("input.s");
+    let o_path = dir.join("output.o");
+    let elf_path = dir.join("output.elf");
 
     info!("Writing program to {s_path:?}");
     fs::write(&s_path, s_content).await?;
@@ -67,15 +68,16 @@ pub async fn compile_s_to_elf(
     }
 
     info!("Elf ready");
-    Ok(dir)
+    Ok(())
 }
 
 pub async fn run_simulator(
-    dir_with_elf: TempDir,
+    dir_with_elf: impl AsRef<Path>,
     ticks: u32,
     simulator_binary: impl AsRef<Path>,
 ) -> Result<String> {
-    let elf_path = dir_with_elf.path().join("output.elf");
+    let dir_with_elf = dir_with_elf.as_ref();
+    let elf_path = dir_with_elf.join("output.elf");
     info!("Simulating the program at {elf_path:?}");
 
     let output = Command::new(simulator_binary.as_ref())
@@ -135,6 +137,36 @@ pub async fn submit_handler(multipart: Multipart) -> (StatusCode, Json<serde_jso
     let ld_binary = std::env::var("LD_BINARY").unwrap_or_else(|_| "riscv64-elf-ld".to_string());
     let simulator_binary =
         std::env::var("SIMULATOR_BINARY").unwrap_or_else(|_| "simulator".to_string());
+    let submissions_folder = 
+        std::env::var("SUBMISSION_FOLDER").unwrap_or_else(|_| "submission".to_string());
+
+    let uuid;
+    let path;
+    loop {
+        let definetly_new_uuid = Uuid::new_v4();
+        let definetly_new_path = Path::new(&submissions_folder)
+            .join(definetly_new_uuid.to_string());
+        let exists = 
+            fs::try_exists(&definetly_new_path)
+            .await;
+        if let Err(e) = exists {
+            error!("can't access {:#?}: {e}", &definetly_new_path);
+            return (StatusCode::INTERNAL_SERVER_ERROR, 
+                Json::from(serde_json::Value::Null));
+        }
+        let exists = exists.unwrap();
+        if !exists {
+            uuid = definetly_new_uuid;
+            path = definetly_new_path;
+            break;
+        }
+    }
+
+    if let Err(e) = fs::create_dir_all(&path).await {
+        error!("can't create {:#?}: {e}", path);
+        return (StatusCode::INTERNAL_SERVER_ERROR, 
+                Json::from(serde_json::Value::Null));
+    }
 
     let (ticks, file_content) = match parse_submit_inputs(multipart).await.context("parse input") {
         Ok(x) => x,
@@ -153,9 +185,13 @@ pub async fn submit_handler(multipart: Multipart) -> (StatusCode, Json<serde_jso
         file_content.len()
     );
 
-    let elf_content = match timeout(
+    match timeout(
         Duration::from_secs(5),
-        compile_s_to_elf(&file_content, &as_binary, &ld_binary),
+        compile_s_to_elf(
+            &file_content, 
+            &path, 
+            &as_binary, 
+            &ld_binary),
     )
     .await
     {
@@ -182,7 +218,7 @@ pub async fn submit_handler(multipart: Multipart) -> (StatusCode, Json<serde_jso
 
     let stdout = match timeout(
         Duration::from_secs(10),
-        run_simulator(elf_content, ticks, &simulator_binary),
+        run_simulator(&path, ticks, &simulator_binary),
     )
     .await
     {
@@ -208,7 +244,21 @@ pub async fn submit_handler(multipart: Multipart) -> (StatusCode, Json<serde_jso
     };
 
     match serde_json::from_str::<serde_json::Value>(&stdout) {
-        Ok(json) => (StatusCode::OK, Json(json)),
+        Ok(mut json) => {
+            if let serde_json::Value::Object(ref mut map) = json {
+                map.insert("uuid".to_string(), 
+                        serde_json::Value::String(uuid.to_string()));
+                map.insert("code".to_string(),
+                        serde_json::Value::String(
+                            str::from_utf8(&file_content)
+                                .unwrap_or_else(|_| "")
+                                .to_string()));
+            }
+            if let Err(e) = fs::write(path.join("simulation.json"), json.to_string()).await {
+                error!("couldn't write simulation.json at {:#?}: {e}", &path);
+            };
+            (StatusCode::OK, Json(json))
+        },
         Err(e) => {
             error!("Simulator printed malformed JSON: {e}");
             (
