@@ -2,6 +2,14 @@ use std::net::{Ipv4Addr, SocketAddrV4};
 use tokio::task::JoinHandle;
 
 use reqwest::Url;
+use tracing::Level;
+
+pub fn init_test() {
+    tracing_subscriber::fmt()
+        .with_level(true)
+        .with_max_level(Level::TRACE)
+        .init();
+}
 
 /// Spawns a risc-v-sim-web instance, listening on the specified port.
 /// Make sure to .await the result of this function as soon as possible to

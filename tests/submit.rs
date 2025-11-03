@@ -3,6 +3,8 @@ use common::*;
 
 #[tokio::test]
 async fn submit_simple() {
+    init_test();
+
     let port = 3000;
     let server_task = spawn_server(port).await;
 
