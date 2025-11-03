@@ -1,0 +1,80 @@
+name: Integration
+
+on: [push, pull_request]
+
+env:
+  RUSTFLAGS: "-D warnings"
+  RUSTDOCFLAGS: "-D warnings"
+  RUST_BACKTRACE: "1"
+  RUST_VERSION: "1.89.0"
+
+jobs:    
+  build-risc-v-sim:
+    runs-on: ubuntu-24.04  
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+      - uses: actions/cache@v4
+        id: cache-build
+        continue-on-error: false
+        with:
+          path: risc-v-sim/target/
+          key: ci-integration-sim-cargo-${{ hashFiles('risc-v-sim/**/Cargo.lock') }}
+          restore-keys: ci-integration-sim-cargo-
+      - name: Build simulator binary
+        if: steps.cache-build.outputs.cache-hit != 'true'
+        # Build in debug for detailed backtraces
+        run: |
+          cd risc-v-sim
+          cargo build
+      - name: Upload simulator binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: simulator
+          path: ./risc-v-sim/target/debug/risc-v-sim
+  run-tests:
+    runs-on: ubuntu-24.04
+    container: krinkin/rv64-toolchain
+    needs: build-risc-v-sim
+    steps:    
+      # Required by the openssl crate
+      # https://docs.rs/openssl/latest/openssl/#automatic
+      - name: Install OpenSSL and pkgconf
+        run: | 
+          apt-get update 
+          apt-get install -y pkg-config libssl-dev
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        id: cache-build
+        continue-on-error: false
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            ~/.rustup
+            target/
+          key: ci-integration-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ci-integration-cargo-
+      - name: Download Rust toolchain
+        if: steps.cache-build.outputs.cache-hit != 'true'
+        run: |
+          apt-get update
+          apt-get install -y curl
+          curl -O https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init
+          chmod +x rustup-init
+          ./rustup-init -y --no-modify-path --default-toolchain $RUST_VERSION
+      - name: Download simulator
+        uses: actions/download-artifact@v4
+        with:
+          name: simulator
+          path: tools
+      - run: |
+          export PATH=~/.cargo/bin:$PATH
+          export SIMULATOR_BINARY=./tools/risc-v-sim
+          chmod u+x ./tools/risc-v-sim
+          export AS_BINARY=riscv64-linux-gnu-as
+          export LD_BINARY=riscv64-linux-gnu-ld
+          cargo test --test "*" --locked -- --show-output
