@@ -6,6 +6,7 @@ use axum::{
     response::Json,
     routing::{get, post},
 };
+use serde::Deserialize;
 use std::path::Path;
 use std::time::Duration;
 use std::{future::Future, pin::Pin};
@@ -16,7 +17,6 @@ use tower::ServiceBuilder;
 use tower_http::services::ServeDir;
 use tracing::{error, info};
 use ulid::Ulid;
-use serde::Deserialize;
 
 #[derive(Deserialize)]
 pub struct Submission {
@@ -139,11 +139,13 @@ async fn ticks_from_field(field: Field<'_>) -> Result<u32> {
     Ok(ticks_str.parse()?)
 }
 
-async fn submit_handler_template(as_binary: String,
-                                ld_binary: String,
-                                simulator_binary: String,
-                                submissions_folder: impl AsRef<Path>,
-                                multipart: Multipart) -> (StatusCode, Json<serde_json::Value>) {
+async fn submit_handler_template(
+    as_binary: String,
+    ld_binary: String,
+    simulator_binary: String,
+    submissions_folder: impl AsRef<Path>,
+    multipart: Multipart,
+) -> (StatusCode, Json<serde_json::Value>) {
     let ulid;
     let path;
 
@@ -281,25 +283,27 @@ async fn submit_handler_template(as_binary: String,
     }
 }
 
-async fn submission_handler_template(submission_folder: impl AsRef<Path>,
-                                     submission: Query<Submission>) 
-                                     -> (axum::http::StatusCode, Json<serde_json::Value>)
-{
+async fn submission_handler_template(
+    submission_folder: impl AsRef<Path>,
+    submission: Query<Submission>,
+) -> (axum::http::StatusCode, Json<serde_json::Value>) {
     let ulid = submission.0.ulid;
     let ulid = Ulid::from_string(&ulid);
     match ulid {
         Err(e) => {
             error!("{e}");
-            (StatusCode::BAD_REQUEST, Json(serde_json::json!({
-                "error": "Not a valid ulid"
-            })))
-        },
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "Not a valid ulid"
+                })),
+            )
+        }
         Ok(ulid) => {
-            let path = 
-                submission_folder
-                    .as_ref()
-                    .join(ulid.to_string())
-                    .join("simulation.json");
+            let path = submission_folder
+                .as_ref()
+                .join(ulid.to_string())
+                .join("simulation.json");
             let exists = fs::try_exists(&path).await;
             if let Err(e) = exists {
                 error!("can't access {:#?}: {e}", &path);
@@ -316,27 +320,35 @@ async fn submission_handler_template(submission_folder: impl AsRef<Path>,
                 match content {
                     Err(e) => {
                         error!("{e}");
-                        (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::Value::Null))
-                    },
-                    Ok(content) => {
-                        match Json::from_bytes(&content) {
-                            Err(e) => {
-                                error!("{e}");
-                                (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::Value::Null))
-                            },
-                            Ok(content) => (StatusCode::OK, content)
-                        }
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(serde_json::Value::Null),
+                        )
                     }
+                    Ok(content) => match Json::from_bytes(&content) {
+                        Err(e) => {
+                            error!("{e}");
+                            (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(serde_json::Value::Null),
+                            )
+                        }
+                        Ok(content) => (StatusCode::OK, content),
+                    },
                 }
             }
         }
     }
 }
 
-pub fn generate_submission_handler(submission_folder: impl AsRef<Path> + 'static) 
-    -> impl FnOnce(Query<Submission>) -> Pin<Box<dyn Future<Output=(axum::http::StatusCode, Json<serde_json::Value>)>>>
-{
-    move |submission: Query<Submission>| Box::pin(submission_handler_template(submission_folder, submission))
+pub fn generate_submission_handler(
+    submission_folder: impl AsRef<Path> + 'static,
+) -> impl FnOnce(
+    Query<Submission>,
+) -> Pin<Box<dyn Future<Output = (axum::http::StatusCode, Json<serde_json::Value>)>>> {
+    move |submission: Query<Submission>| {
+        Box::pin(submission_handler_template(submission_folder, submission))
+    }
 }
 
 pub fn create_app() -> Router {
@@ -344,26 +356,31 @@ pub fn create_app() -> Router {
     let ld_binary = std::env::var("LD_BINARY").unwrap_or_else(|_| "riscv64-elf-ld".to_string());
     let simulator_binary =
         std::env::var("SIMULATOR_BINARY").unwrap_or_else(|_| "simulator".to_string());
-    let submissions_folder = 
+    let submissions_folder =
         std::env::var("SUBMISSIONS_FOLDER").unwrap_or_else(|_| "submission".to_string());
 
     let submissions_folder_clone = submissions_folder.clone();
-    
+
     let submit_handler = move |multipart: Multipart| {
         let as_binary = as_binary.clone();
         let ld_binary = ld_binary.clone();
         let simulator_binary = simulator_binary.clone();
         let submissions_folder = submissions_folder_clone.clone();
         async move {
-            submit_handler_template(as_binary, ld_binary, simulator_binary, submissions_folder, multipart).await
+            submit_handler_template(
+                as_binary,
+                ld_binary,
+                simulator_binary,
+                submissions_folder,
+                multipart,
+            )
+            .await
         }
     };
 
     let submission_handler = move |submission: Query<Submission>| {
         let submissions_folder = submissions_folder.clone();
-        async move {
-            submission_handler_template(submissions_folder, submission).await
-        }
+        async move { submission_handler_template(submissions_folder, submission).await }
     };
 
     Router::new()
