@@ -14,7 +14,7 @@ use tokio::time::timeout;
 use tower::ServiceBuilder;
 use tower_http::services::ServeDir;
 use tracing::{error, info};
-use uuid::Uuid;
+use ulid::Ulid;
 
 pub async fn health_handler() -> &'static str {
     "Ok"
@@ -23,8 +23,8 @@ pub async fn health_handler() -> &'static str {
 pub async fn compile_s_to_elf(
     s_content: &[u8],
     submission_dir: impl AsRef<Path>,
-    as_binary:      impl AsRef<Path>,
-    ld_binary:      impl AsRef<Path>,
+    as_binary: impl AsRef<Path>,
+    ld_binary: impl AsRef<Path>,
 ) -> Result<()> {
     let dir = submission_dir.as_ref();
     let s_path = dir.join("input.s");
@@ -137,22 +137,22 @@ pub async fn submit_handler(multipart: Multipart) -> (StatusCode, Json<serde_jso
     let ld_binary = std::env::var("LD_BINARY").unwrap_or_else(|_| "riscv64-elf-ld".to_string());
     let simulator_binary =
         std::env::var("SIMULATOR_BINARY").unwrap_or_else(|_| "simulator".to_string());
-    let submissions_folder = 
+    let submissions_folder =
         std::env::var("SUBMISSION_FOLDER").unwrap_or_else(|_| "submission".to_string());
 
     let uuid;
     let path;
     loop {
-        let definetly_new_uuid = Uuid::new_v4();
-        let definetly_new_path = Path::new(&submissions_folder)
-            .join(definetly_new_uuid.to_string());
-        let exists = 
-            fs::try_exists(&definetly_new_path)
-            .await;
+        let definetly_new_uuid = Ulid::new();
+        let definetly_new_path =
+            Path::new(&submissions_folder).join(definetly_new_uuid.to_string());
+        let exists = fs::try_exists(&definetly_new_path).await;
         if let Err(e) = exists {
             error!("can't access {:#?}: {e}", &definetly_new_path);
-            return (StatusCode::INTERNAL_SERVER_ERROR, 
-                Json::from(serde_json::Value::Null));
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json::from(serde_json::Value::Null),
+            );
         }
         let exists = exists.unwrap();
         if !exists {
@@ -164,8 +164,10 @@ pub async fn submit_handler(multipart: Multipart) -> (StatusCode, Json<serde_jso
 
     if let Err(e) = fs::create_dir_all(&path).await {
         error!("can't create {:#?}: {e}", path);
-        return (StatusCode::INTERNAL_SERVER_ERROR, 
-                Json::from(serde_json::Value::Null));
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json::from(serde_json::Value::Null),
+        );
     }
 
     let (ticks, file_content) = match parse_submit_inputs(multipart).await.context("parse input") {
@@ -187,11 +189,7 @@ pub async fn submit_handler(multipart: Multipart) -> (StatusCode, Json<serde_jso
 
     match timeout(
         Duration::from_secs(5),
-        compile_s_to_elf(
-            &file_content, 
-            &path, 
-            &as_binary, 
-            &ld_binary),
+        compile_s_to_elf(&file_content, &path, &as_binary, &ld_binary),
     )
     .await
     {
@@ -246,19 +244,24 @@ pub async fn submit_handler(multipart: Multipart) -> (StatusCode, Json<serde_jso
     match serde_json::from_str::<serde_json::Value>(&stdout) {
         Ok(mut json) => {
             if let serde_json::Value::Object(ref mut map) = json {
-                map.insert("uuid".to_string(), 
-                        serde_json::Value::String(uuid.to_string()));
-                map.insert("code".to_string(),
-                        serde_json::Value::String(
-                            str::from_utf8(&file_content)
-                                .unwrap_or_else(|_| "")
-                                .to_string()));
+                map.insert(
+                    "uuid".to_string(),
+                    serde_json::Value::String(uuid.to_string()),
+                );
+                map.insert(
+                    "code".to_string(),
+                    serde_json::Value::String(
+                        str::from_utf8(&file_content)
+                            .unwrap_or_else(|_| "")
+                            .to_string(),
+                    ),
+                );
             }
             if let Err(e) = fs::write(path.join("simulation.json"), json.to_string()).await {
                 error!("couldn't write simulation.json at {:#?}: {e}", &path);
             };
             (StatusCode::OK, Json(json))
-        },
+        }
         Err(e) => {
             error!("Simulator printed malformed JSON: {e}");
             (

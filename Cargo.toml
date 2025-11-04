@@ -23,6 +23,7 @@ tracing-subscriber = "0.3.2"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["fs", "cors"] }
 uuid = { version = "1.18.1", features = ["v4"] }
+ulid = "1.2.1"
 
 [dev-dependencies]
 reqwest = { version = "0.12.24", features = ["multipart", "stream"] }
