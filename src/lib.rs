@@ -1,13 +1,14 @@
 use anyhow::{Context, Result, bail};
 use axum::{
     Router,
-    extract::{Multipart, multipart::Field},
+    extract::{Multipart, Query, multipart::Field},
     http::StatusCode,
     response::Json,
     routing::{get, post},
 };
 use std::path::Path;
 use std::time::Duration;
+use std::{future::Future, pin::Pin};
 use tokio::fs;
 use tokio::process::Command;
 use tokio::time::timeout;
@@ -15,6 +16,12 @@ use tower::ServiceBuilder;
 use tower_http::services::ServeDir;
 use tracing::{error, info};
 use ulid::Ulid;
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+pub struct Submission {
+    ulid: String,
+}
 
 pub async fn health_handler() -> &'static str {
     "Ok"
@@ -132,20 +139,20 @@ async fn ticks_from_field(field: Field<'_>) -> Result<u32> {
     Ok(ticks_str.parse()?)
 }
 
-pub async fn submit_handler(multipart: Multipart) -> (StatusCode, Json<serde_json::Value>) {
-    let as_binary = std::env::var("AS_BINARY").unwrap_or_else(|_| "riscv64-elf-as".to_string());
-    let ld_binary = std::env::var("LD_BINARY").unwrap_or_else(|_| "riscv64-elf-ld".to_string());
-    let simulator_binary =
-        std::env::var("SIMULATOR_BINARY").unwrap_or_else(|_| "simulator".to_string());
-    let submissions_folder =
-        std::env::var("SUBMISSION_FOLDER").unwrap_or_else(|_| "submission".to_string());
-
-    let uuid;
+async fn submit_handler_template(as_binary: String,
+                                ld_binary: String,
+                                simulator_binary: String,
+                                submissions_folder: impl AsRef<Path>,
+                                multipart: Multipart) -> (StatusCode, Json<serde_json::Value>) {
+    let ulid;
     let path;
+
+    let submissions_folder = submissions_folder.as_ref();
+
     loop {
-        let definetly_new_uuid = Ulid::new();
+        let definetly_new_ulid = Ulid::new();
         let definetly_new_path =
-            Path::new(&submissions_folder).join(definetly_new_uuid.to_string());
+            Path::new(&submissions_folder).join(definetly_new_ulid.to_string());
         let exists = fs::try_exists(&definetly_new_path).await;
         if let Err(e) = exists {
             error!("can't access {:#?}: {e}", &definetly_new_path);
@@ -156,7 +163,7 @@ pub async fn submit_handler(multipart: Multipart) -> (StatusCode, Json<serde_jso
         }
         let exists = exists.unwrap();
         if !exists {
-            uuid = definetly_new_uuid;
+            ulid = definetly_new_ulid;
             path = definetly_new_path;
             break;
         }
@@ -245,8 +252,8 @@ pub async fn submit_handler(multipart: Multipart) -> (StatusCode, Json<serde_jso
         Ok(mut json) => {
             if let serde_json::Value::Object(ref mut map) = json {
                 map.insert(
-                    "uuid".to_string(),
-                    serde_json::Value::String(uuid.to_string()),
+                    "ulid".to_string(),
+                    serde_json::Value::String(ulid.to_string()),
                 );
                 map.insert(
                     "code".to_string(),
@@ -274,13 +281,98 @@ pub async fn submit_handler(multipart: Multipart) -> (StatusCode, Json<serde_jso
     }
 }
 
+async fn submission_handler_template(submission_folder: impl AsRef<Path>,
+                                     submission: Query<Submission>) 
+                                     -> (axum::http::StatusCode, Json<serde_json::Value>)
+{
+    let ulid = submission.0.ulid;
+    let ulid = Ulid::from_string(&ulid);
+    match ulid {
+        Err(e) => {
+            error!("{e}");
+            (StatusCode::BAD_REQUEST, Json(serde_json::json!({
+                "error": "Not a valid ulid"
+            })))
+        },
+        Ok(ulid) => {
+            let path = 
+                submission_folder
+                    .as_ref()
+                    .join(ulid.to_string())
+                    .join("simulation.json");
+            let exists = fs::try_exists(&path).await;
+            if let Err(e) = exists {
+                error!("can't access {:#?}: {e}", &path);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json::from(serde_json::Value::Null),
+                );
+            }
+            let exists = exists.unwrap();
+            if !exists {
+                (StatusCode::NOT_FOUND, Json(serde_json::Value::Null))
+            } else {
+                let content = fs::read(path).await;
+                match content {
+                    Err(e) => {
+                        error!("{e}");
+                        (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::Value::Null))
+                    },
+                    Ok(content) => {
+                        match Json::from_bytes(&content) {
+                            Err(e) => {
+                                error!("{e}");
+                                (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::Value::Null))
+                            },
+                            Ok(content) => (StatusCode::OK, content)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub fn generate_submission_handler(submission_folder: impl AsRef<Path> + 'static) 
+    -> impl FnOnce(Query<Submission>) -> Pin<Box<dyn Future<Output=(axum::http::StatusCode, Json<serde_json::Value>)>>>
+{
+    move |submission: Query<Submission>| Box::pin(submission_handler_template(submission_folder, submission))
+}
+
 pub fn create_app() -> Router {
+    let as_binary = std::env::var("AS_BINARY").unwrap_or_else(|_| "riscv64-elf-as".to_string());
+    let ld_binary = std::env::var("LD_BINARY").unwrap_or_else(|_| "riscv64-elf-ld".to_string());
+    let simulator_binary =
+        std::env::var("SIMULATOR_BINARY").unwrap_or_else(|_| "simulator".to_string());
+    let submissions_folder = 
+        std::env::var("SUBMISSIONS_FOLDER").unwrap_or_else(|_| "submission".to_string());
+
+    let submissions_folder_clone = submissions_folder.clone();
+    
+    let submit_handler = move |multipart: Multipart| {
+        let as_binary = as_binary.clone();
+        let ld_binary = ld_binary.clone();
+        let simulator_binary = simulator_binary.clone();
+        let submissions_folder = submissions_folder_clone.clone();
+        async move {
+            submit_handler_template(as_binary, ld_binary, simulator_binary, submissions_folder, multipart).await
+        }
+    };
+
+    let submission_handler = move |submission: Query<Submission>| {
+        let submissions_folder = submissions_folder.clone();
+        async move {
+            submission_handler_template(submissions_folder, submission).await
+        }
+    };
+
     Router::new()
         .nest(
             "/api",
             Router::new()
                 .route("/health", get(health_handler))
-                .route("/submit", post(submit_handler)),
+                .route("/submit", post(submit_handler))
+                .route("/submission", get(submission_handler)),
         )
         .fallback_service(ServeDir::new("static"))
         .layer(ServiceBuilder::new().layer(tower_http::cors::CorsLayer::permissive()))
