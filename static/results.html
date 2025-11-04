@@ -9,9 +9,21 @@
 <body>
     <div class="container">
         <div class="results-container">
-            <div class="loading">
-                <div class="spinner"></div>
-                <p>Loading results...</p>
+            <div class="results-header">
+                <div>
+                    <h1>Simulation Results</h1>
+                    <p>Number of ticks: <span id="ticks-display">-</span></p>
+                </div>
+                <nav class="results-nav">
+                    <a href="/" class="nav-link">← Back to Simulator</a>
+                    <a href="submissions.html" class="nav-link">My Submissions</a>
+                </nav>
+            </div>
+            <div id="results-content">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p>Loading results...</p>
+                </div>
             </div>
         </div>
     </div>
