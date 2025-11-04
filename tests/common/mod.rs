@@ -2,12 +2,13 @@ use std::net::{Ipv4Addr, SocketAddrV4};
 use tokio::task::JoinHandle;
 
 use reqwest::Url;
+use tower_http::trace::TraceLayer;
 use tracing::Level;
 
 pub fn init_test() {
     tracing_subscriber::fmt()
         .with_level(true)
-        .with_max_level(Level::TRACE)
+        .with_max_level(Level::DEBUG)
         .init();
 }
 
@@ -25,7 +26,7 @@ pub async fn spawn_server(port: u16) -> JoinHandle<()> {
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
 
     tokio::spawn(async move {
-        let app = risc_v_sim_web::create_app();
+        let app = risc_v_sim_web::create_app().layer(TraceLayer::new_for_http());
         axum::serve(listener, app).await.unwrap();
     })
 }
