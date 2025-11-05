@@ -9,7 +9,6 @@ use axum::{
 use serde::Deserialize;
 use std::path::Path;
 use std::time::Duration;
-use std::{future::Future, pin::Pin};
 use tokio::fs;
 use tokio::process::Command;
 use tokio::time::timeout;
@@ -338,16 +337,6 @@ async fn submission_handler_template(
                 }
             }
         }
-    }
-}
-
-pub fn generate_submission_handler(
-    submission_folder: impl AsRef<Path> + 'static,
-) -> impl FnOnce(
-    Query<Submission>,
-) -> Pin<Box<dyn Future<Output = (axum::http::StatusCode, Json<serde_json::Value>)>>> {
-    move |submission: Query<Submission>| {
-        Box::pin(submission_handler_template(submission_folder, submission))
     }
 }
 
