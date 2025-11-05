@@ -30,7 +30,7 @@ pub async fn spawn_server(cfg: risc_v_sim_web::Config) -> (u16, JoinHandle<()>) 
     (port, task)
 }
 
-pub fn default_config() -> risc_v_sim_web::Config {
+pub fn default_config(testname: &str) -> risc_v_sim_web::Config {
     risc_v_sim_web::Config {
         as_binary: std::env::var("AS_BINARY")
             .unwrap_or_else(|_| "riscv64-elf-as".to_string())
@@ -41,9 +41,7 @@ pub fn default_config() -> risc_v_sim_web::Config {
         simulator_binary: std::env::var("SIMULATOR_BINARY")
             .unwrap_or_else(|_| "simulator".to_string())
             .into(),
-        submissions_folder: std::env::var("SUBMISSIONS_FOLDER")
-            .unwrap_or_else(|_| "submission".to_string())
-            .into(),
+        submissions_folder: format!("submissions-{testname}").into(),
     }
 }
 

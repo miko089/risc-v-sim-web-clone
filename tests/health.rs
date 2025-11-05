@@ -5,7 +5,7 @@ use common::*;
 async fn health_check() {
     init_test();
 
-    let (port, server_task) = spawn_server(default_config()).await;
+    let (port, server_task) = spawn_server(default_config("health")).await;
 
     let request_url = server_url(port).join("api/health").unwrap();
     let health_response = reqwest::get(request_url).await.unwrap();

@@ -5,7 +5,7 @@ use common::*;
 async fn submit_simple() {
     init_test();
 
-    let (port, server_task) = spawn_server(default_config()).await;
+    let (port, server_task) = spawn_server(default_config("submit_simple")).await;
 
     let request_url = server_url(port).join("api/submit").unwrap();
     let client = reqwest::Client::new();
