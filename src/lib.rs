@@ -306,55 +306,49 @@ async fn submission_handler(
     let ulid = submission.0.ulid;
     let ulid = Ulid::from_string(&ulid);
 
-    match ulid {
-        Err(e) => {
-            error!("{e}");
-            (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({
-                    "error": "Not a valid ulid"
-                })),
-            )
-        }
-        Ok(ulid) => {
-            let path = PathBuf::from(submissions_folder)
-                .join(ulid.to_string())
-                .join("simulation.json");
-            let exists = fs::try_exists(&path).await;
-            if let Err(e) = exists {
-                error!("can't access {:#?}: {e}", &path);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json::from(serde_json::Value::Null),
-                );
-            }
-            let exists = exists.unwrap();
-            if !exists {
-                (StatusCode::NOT_FOUND, Json(serde_json::Value::Null))
-            } else {
-                let content = fs::read(path).await;
-                match content {
-                    Err(e) => {
-                        error!("{e}");
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(serde_json::Value::Null),
-                        )
-                    }
-                    Ok(content) => match Json::from_bytes(&content) {
-                        Err(e) => {
-                            error!("{e}");
-                            (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                Json(serde_json::Value::Null),
-                            )
-                        }
-                        Ok(content) => (StatusCode::OK, content),
-                    },
-                }
-            }
-        }
+    if let Err(e) = ulid {
+        error!("{e}");
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "Not a valid ulid"
+            })),
+        );
     }
+    let ulid = ulid.unwrap();
+    let path = PathBuf::from(submissions_folder)
+        .join(ulid.to_string())
+        .join("simulation.json");
+    let exists = fs::try_exists(&path).await;
+    if let Err(e) = exists {
+        error!("can't access {:#?}: {e}", &path);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json::from(serde_json::Value::Null),
+        );
+    }
+    let exists = exists.unwrap();
+    if !exists {
+        return (StatusCode::NOT_FOUND, Json(serde_json::Value::Null));
+    } 
+    let content = fs::read(path).await;
+    if let Err(e) = content {
+        error!("{e}");
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::Value::Null),
+        );
+    }
+    let content = content.unwrap();
+    let json_content = Json::from_bytes(&content);
+    if let Err(e) = json_content {
+        error!("{e}");
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::Value::Null),
+        );
+    }
+    (StatusCode::OK, json_content.unwrap())
 }
 
 pub fn create_app() -> Router {
