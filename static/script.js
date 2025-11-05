@@ -89,25 +89,62 @@ class RISCVSimulator {
                 body: formData
             });
 
-            const result = await response.json();
+            const submitResult = await response.json();
             
             // Check if the response contains an error (compilation errors come as {error: "..."})
-            if (result.error) {
-                throw new Error(result.error);
+            if (submitResult.error) {
+                throw new Error(submitResult.error);
             }
             
             // For non-2xx responses, also check for error details
             if (!response.ok) {
-                const errorText = result.error || result.err?.msg || `HTTP ${response.status}`;
+                const errorText = submitResult.error || submitResult.err?.msg || `HTTP ${response.status}`;
                 throw new Error(errorText);
+            }
+
+            // Update loading text to show polling
+            this.updateLoadingText('Polling for results...');
+
+            // Poll for results using the ULID
+            let result = null;
+            let attempts = 0;
+            const maxAttempts = 60;
+
+            while (attempts < maxAttempts) {
+                const pollResponse = await fetch(`/api/submission?ulid=${encodeURIComponent(submitResult.ulid)}`);
+                
+                if (pollResponse.ok) {
+                    result = await pollResponse.json();
+                    break;
+                }
+                
+                if (pollResponse.status !== 404) {
+                    throw new Error(`HTTP ${pollResponse.status}`);
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                attempts++;
+            }
+
+            if (!result) {
+                throw new Error('Simulation not found after polling');
+            }
+
+            // Check if the result contains a simulator error
+            if (result.error) {
+                // Save the error with the real ULID
+                this.saveSubmissionError(result.error, code, ticks, submitResult.ulid);
+                throw new Error(result.error);
             }
 
             this.showResults(result, code, ticks);
 
         } catch (error) {
             this.showError(error.message);
-            // Save compilation errors to submissions
-            this.saveSubmissionError(error.message, code, ticks);
+            // Save compilation errors to submissions (only for non-simulator errors)
+            if (!error.message.includes('simulator failed')) {
+                this.saveSubmissionError(error.message, code, ticks, submitResult?.ulid);
+            }
         } finally {
             this.showLoading(false);
         }
@@ -122,10 +159,18 @@ class RISCVSimulator {
             runBtn.disabled = true;
             btnText.style.display = 'none';
             btnLoading.style.display = 'inline';
+            btnLoading.textContent = 'Executing...';
         } else {
             runBtn.disabled = false;
             btnText.style.display = 'inline';
             btnLoading.style.display = 'none';
+        }
+    }
+
+    updateLoadingText(text) {
+        const btnLoading = document.querySelector('.btn-loading');
+        if (btnLoading) {
+            btnLoading.textContent = text;
         }
     }
 
@@ -179,9 +224,9 @@ class RISCVSimulator {
         this.addSubmission(submission);
     }
 
-    saveSubmissionError(errorMessage, originalCode, ticks) {
+    saveSubmissionError(errorMessage, originalCode, ticks, ulid = null) {
         const submission = {
-            id: this.generateId(),
+            id: ulid,
             timestamp: new Date().toISOString(),
             ticks: parseInt(ticks) || 0,
             code: originalCode,
@@ -488,24 +533,48 @@ class SubmissionsPage {
             return;
         }
 
+        const fetchBtn = document.getElementById('fetch-btn');
+        const originalText = fetchBtn.textContent;
+        
         try {
-            const response = await fetch(`/api/submission?ulid=${encodeURIComponent(id)}`);
-            
-            if (!response.ok) {
-                if (response.status === 404) {
-                    alert('Submission not found');
-                } else {
-                    alert('Error fetching submission');
+            fetchBtn.textContent = 'Polling...';
+            fetchBtn.disabled = true;
+
+            let result = null;
+            let attempts = 0;
+            const maxAttempts = 15;
+
+            while (attempts < maxAttempts) {
+                const response = await fetch(`/api/submission?ulid=${encodeURIComponent(id)}`);
+                
+                if (response.ok) {
+                    result = await response.json();
+                    break;
                 }
+                
+                if (response.status !== 404) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                attempts++;
+            }
+
+            if (!result) {
+                alert('Submission not found after polling');
                 return;
             }
 
-            const result = await response.json();
+            // Check if the result contains a simulator error
+            if (result.error) {
+                alert('Simulation error: ' + result.error);
+                return;
+            }
             
             // Save to sessionStorage for results page
             sessionStorage.setItem('simulationResult', JSON.stringify(result));
             sessionStorage.setItem('originalCode', result.code || '');
-            sessionStorage.setItem('ticks', '0'); // We don't have this info from API
+            sessionStorage.setItem('ticks', (result.ticks || 0).toString());
 
             // Navigate to results page
             window.location.href = 'results.html';
@@ -513,6 +582,9 @@ class SubmissionsPage {
         } catch (error) {
             console.error('Error fetching submission:', error);
             alert('Error fetching submission');
+        } finally {
+            fetchBtn.textContent = originalText;
+            fetchBtn.disabled = false;
         }
     }
 
@@ -1246,24 +1318,48 @@ class ResultsPage {
             return;
         }
 
+        const fetchBtn = document.getElementById('fetch-btn');
+        const originalText = fetchBtn.textContent;
+        
         try {
-            const response = await fetch(`/api/submission?ulid=${encodeURIComponent(id)}`);
-            
-            if (!response.ok) {
-                if (response.status === 404) {
-                    alert('Submission not found');
-                } else {
-                    alert('Error fetching submission');
+            fetchBtn.textContent = 'Polling...';
+            fetchBtn.disabled = true;
+
+            let result = null;
+            let attempts = 0;
+            const maxAttempts = 60;
+
+            while (attempts < maxAttempts) {
+                const response = await fetch(`/api/submission?ulid=${encodeURIComponent(id)}`);
+                
+                if (response.ok) {
+                    result = await response.json();
+                    break;
                 }
+                
+                if (response.status !== 404) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                attempts++;
+            }
+
+            if (!result) {
+                alert('Submission not found after polling');
                 return;
             }
 
-            const result = await response.json();
+            // Check if the result contains a simulator error
+            if (result.error) {
+                alert('Simulation error: ' + result.error);
+                return;
+            }
             
             // Save to sessionStorage for results page
             sessionStorage.setItem('simulationResult', JSON.stringify(result));
             sessionStorage.setItem('originalCode', result.code || '');
-            sessionStorage.setItem('ticks', '0'); // We don't have this info from API
+            sessionStorage.setItem('ticks', (result.ticks || 0).toString());
 
             // Navigate to results page
             window.location.href = 'results.html';
@@ -1271,6 +1367,9 @@ class ResultsPage {
         } catch (error) {
             console.error('Error fetching submission:', error);
             alert('Error fetching submission');
+        } finally {
+            fetchBtn.textContent = originalText;
+            fetchBtn.disabled = false;
         }
     }
 
