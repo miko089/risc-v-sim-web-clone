@@ -1,8 +1,10 @@
 use std::net::{Ipv4Addr, SocketAddrV4};
-use tokio::{net::TcpListener, task::JoinHandle};
+use std::path::Path;
 
-use reqwest::Url;
+use reqwest::{Client, Response, Url};
+use tokio::{net::TcpListener, task::JoinHandle};
 use tracing::{Instrument, Level, Span, info};
+use ulid::Ulid;
 
 pub async fn run_test<Patch, Body, F>(test_name: &str, patch_cfg: Patch, body: Body)
 where
@@ -64,6 +66,38 @@ pub fn default_config(test_name: &str) -> risc_v_sim_web::Config {
             .into(),
         submissions_folder: format!("submissions-{test_name}").into(),
     }
+}
+
+#[allow(dead_code)]
+pub async fn submit_program(
+    client: &Client,
+    port: u16,
+    ticks: u32,
+    path: impl AsRef<Path>,
+) -> Response {
+    let request_url = server_url(port).join("api/submit").unwrap();
+    let form = reqwest::multipart::Form::new()
+        .text("ticks", ticks.to_string())
+        .file("file", path)
+        .await
+        .unwrap();
+    client
+        .post(request_url)
+        .multipart(form)
+        .send()
+        .await
+        .unwrap()
+}
+
+#[allow(dead_code)]
+pub async fn get_submission(client: &Client, port: u16, submission_id: Ulid) -> Response {
+    let request_url = server_url(port).join("api/submission").unwrap();
+    client
+        .get(request_url)
+        .query(&[("ulid", &submission_id.to_string())])
+        .send()
+        .await
+        .unwrap()
 }
 
 /// Returns the server url.
