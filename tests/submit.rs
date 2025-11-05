@@ -56,6 +56,21 @@ async fn submit_and_wait() {
     .await;
 }
 
+#[tokio::test]
+async fn submit_non_existent() {
+    run_test(
+        "submit_non_existent",
+        |_| {},
+        async |port| {
+            let client = reqwest::Client::new();
+            let fake_submission_id = Ulid::new();
+            let response = get_submission(&client, port, fake_submission_id).await;
+            assert_eq!(response.status(), reqwest::StatusCode::NOT_FOUND);
+        },
+    )
+    .await;
+}
+
 async fn wait_submission(client: &Client, port: u16, submission_id: Ulid) -> Response {
     loop {
         let response = get_submission(&client, port, submission_id).await;
