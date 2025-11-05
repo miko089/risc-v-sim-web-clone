@@ -26,7 +26,7 @@ async fn submit_simple() {
         Ok(x) => format!("Response as text: {x}"),
         Err(e) => format!("Response has no text: {e}"),
     };
-    assert_eq!(submit_status, reqwest::StatusCode::OK, "{resp_text}");
+    assert_eq!(submit_status, reqwest::StatusCode::ACCEPTED, "{resp_text}");
 
     server_task.abort();
 }

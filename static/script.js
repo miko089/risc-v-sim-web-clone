@@ -89,23 +89,62 @@ class RISCVSimulator {
                 body: formData
             });
 
-            const result = await response.json();
+            const submitResult = await response.json();
             
             // Check if the response contains an error (compilation errors come as {error: "..."})
-            if (result.error) {
-                throw new Error(result.error);
+            if (submitResult.error) {
+                throw new Error(submitResult.error);
             }
             
             // For non-2xx responses, also check for error details
             if (!response.ok) {
-                const errorText = result.error || result.err?.msg || `HTTP ${response.status}`;
+                const errorText = submitResult.error || submitResult.err?.msg || `HTTP ${response.status}`;
                 throw new Error(errorText);
+            }
+
+            // Update loading text to show polling
+            this.updateLoadingText('Polling for results...');
+
+            // Poll for results using the ULID
+            let result = null;
+            let attempts = 0;
+            const maxAttempts = 60;
+
+            while (attempts < maxAttempts) {
+                const pollResponse = await fetch(`/api/submission?ulid=${encodeURIComponent(submitResult.ulid)}`);
+                
+                if (pollResponse.ok) {
+                    result = await pollResponse.json();
+                    break;
+                }
+                
+                if (pollResponse.status !== 404) {
+                    throw new Error(`HTTP ${pollResponse.status}`);
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                attempts++;
+            }
+
+            if (!result) {
+                throw new Error('Simulation not found after polling');
+            }
+
+            // Check if the result contains a simulator error
+            if (result.error) {
+                // Save the error with the real ULID
+                this.saveSubmissionError(result.error, code, ticks, submitResult.ulid);
+                throw new Error(result.error);
             }
 
             this.showResults(result, code, ticks);
 
         } catch (error) {
             this.showError(error.message);
+            // Save compilation errors to submissions (only for non-simulator errors)
+            if (!error.message.includes('simulator failed')) {
+                this.saveSubmissionError(error.message, code, ticks, submitResult?.ulid);
+            }
         } finally {
             this.showLoading(false);
         }
@@ -120,10 +159,18 @@ class RISCVSimulator {
             runBtn.disabled = true;
             btnText.style.display = 'none';
             btnLoading.style.display = 'inline';
+            btnLoading.textContent = 'Executing...';
         } else {
             runBtn.disabled = false;
             btnText.style.display = 'inline';
             btnLoading.style.display = 'none';
+        }
+    }
+
+    updateLoadingText(text) {
+        const btnLoading = document.querySelector('.btn-loading');
+        if (btnLoading) {
+            btnLoading.textContent = text;
         }
     }
 
@@ -152,6 +199,9 @@ class RISCVSimulator {
     }
 
     showResults(result, originalCode, ticks) {
+        // Save to localStorage for submissions history
+        this.saveSubmission(result, originalCode, ticks);
+        
         // Save results to sessionStorage for results page
         sessionStorage.setItem('simulationResult', JSON.stringify(result));
         sessionStorage.setItem('originalCode', originalCode);
@@ -159,6 +209,389 @@ class RISCVSimulator {
 
         // Navigate to results page
         window.location.href = 'results.html';
+    }
+
+    saveSubmission(result, originalCode, ticks) {
+        const submission = {
+            id: result.ulid || this.generateId(),
+            timestamp: new Date().toISOString(),
+            ticks: parseInt(ticks) || 0,
+            code: originalCode,
+            result: result,
+            status: result.error ? 'error' : 'success'
+        };
+
+        this.addSubmission(submission);
+    }
+
+    saveSubmissionError(errorMessage, originalCode, ticks, ulid = null) {
+        const submission = {
+            id: ulid,
+            timestamp: new Date().toISOString(),
+            ticks: parseInt(ticks) || 0,
+            code: originalCode,
+            result: {
+                error: { msg: errorMessage },
+                steps: []
+            },
+            status: 'error'
+        };
+
+        this.addSubmission(submission);
+    }
+
+    addSubmission(submission) {
+        // Get existing submissions
+        const submissions = this.getSubmissions();
+        
+        // Add new submission at the beginning
+        submissions.unshift(submission);
+        
+        // Keep only last 50 submissions
+        if (submissions.length > 50) {
+            submissions.splice(50);
+        }
+        
+        // Save to localStorage
+        localStorage.setItem('riscv_submissions', JSON.stringify(submissions));
+    }
+
+    getSubmissions() {
+        try {
+            const stored = localStorage.getItem('riscv_submissions');
+            return stored ? JSON.parse(stored) : [];
+        } catch (error) {
+            console.error('Error loading submissions:', error);
+            return [];
+        }
+    }
+
+    deleteSubmission(id) {
+        const submissions = this.getSubmissions();
+        const filtered = submissions.filter(sub => sub.id !== id);
+        localStorage.setItem('riscv_submissions', JSON.stringify(filtered));
+    }
+
+    clearAllSubmissions() {
+        localStorage.removeItem('riscv_submissions');
+    }
+
+    generateId() {
+        return Date.now().toString(36) + Math.random().toString(36).substr(2);
+    }
+}
+
+class SubmissionsPage {
+    constructor() {
+        this.submissions = [];
+        this.initializePage();
+    }
+
+    initializePage() {
+        this.loadSubmissions();
+        this.setupEventListeners();
+    }
+
+    setupEventListeners() {
+        const clearAllBtn = document.getElementById('clear-all-btn');
+        const fetchByIdBtn = document.getElementById('fetch-by-id-btn');
+        const modalClose = document.getElementById('modal-close');
+        const cancelBtn = document.getElementById('cancel-btn');
+        const fetchBtn = document.getElementById('fetch-btn');
+        const modal = document.getElementById('fetch-modal');
+
+        if (clearAllBtn) {
+            clearAllBtn.addEventListener('click', () => this.clearAll());
+        }
+
+        if (fetchByIdBtn) {
+            fetchByIdBtn.addEventListener('click', () => this.showFetchModal());
+        }
+
+        if (modalClose) {
+            modalClose.addEventListener('click', () => this.hideFetchModal());
+        }
+
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', () => this.hideFetchModal());
+        }
+
+        if (fetchBtn) {
+            fetchBtn.addEventListener('click', () => this.fetchSubmissionById());
+        }
+
+        // Close modal when clicking outside
+        if (modal) {
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    this.hideFetchModal();
+                }
+            });
+        }
+
+        // Handle Enter key in input
+        const idInput = document.getElementById('submission-id');
+        if (idInput) {
+            idInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    this.fetchSubmissionById();
+                }
+            });
+        }
+    }
+
+    loadSubmissions() {
+        this.submissions = this.getSubmissions();
+        this.renderSubmissions();
+    }
+
+    renderSubmissions() {
+        const container = document.getElementById('submissions-list');
+        if (!container) return;
+
+        if (this.submissions.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <h3>No submissions yet</h3>
+                    <p>You haven't made any RISC-V simulations yet.</p>
+                    <a href="/" class="back-btn">Create your first simulation</a>
+                </div>
+            `;
+            return;
+        }
+
+        const submissionsHtml = this.submissions.map((submission, index) => 
+            this.renderSubmission(submission, index)
+        ).join('');
+
+        container.innerHTML = submissionsHtml;
+        this.setupSubmissionHandlers();
+    }
+
+    renderSubmission(submission, index) {
+        const date = new Date(submission.timestamp);
+        const formattedDate = date.toLocaleString();
+
+        
+        const codePreview = submission.code.length > 200 
+            ? submission.code.substring(0, 200) + '...' 
+            : submission.code;
+
+        return `
+            <div class="submission" data-id="${submission.id}">
+                <div class="submission-header">
+                    <div class="submission-info">
+                        <div class="submission-id">ID: ${submission.id}</div>
+                        <div class="submission-meta">
+
+                            <div class="meta-item">
+                                <span class="meta-label">Ticks:</span>
+                                <span class="meta-value">${submission.ticks}</span>
+                            </div>
+                            <div class="meta-item">
+                                <span class="meta-label">Date:</span>
+                                <span class="meta-value">${formattedDate}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="submission-actions">
+                        <button class="submission-btn view-btn" data-id="${submission.id}">View</button>
+                        <button class="submission-btn delete-btn" data-id="${submission.id}">Delete</button>
+                    </div>
+                </div>
+                <div class="submission-content">
+                    <div class="submission-code">
+                        <pre>${this.escapeHtml(codePreview)}</pre>
+                    </div>
+                    <div class="submission-stats">
+                        <div class="stat-card">
+                            <div class="stat-label">Steps</div>
+                            <div class="stat-value">${submission.result.steps?.length || 0}</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Instructions</div>
+                            <div class="stat-value">${this.countInstructions(submission.result)}</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Code Size</div>
+                            <div class="stat-value">${submission.code.length} chars</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    countInstructions(result) {
+        if (!result.steps || !Array.isArray(result.steps)) return 0;
+        
+        const instructions = new Set();
+        result.steps.forEach(step => {
+            if (step.instruction && step.instruction.mnemonic) {
+                instructions.add(step.instruction.mnemonic);
+            }
+        });
+        return instructions.size;
+    }
+
+    setupSubmissionHandlers() {
+        // Header click to expand/collapse
+        const headers = document.querySelectorAll('.submission-header');
+        headers.forEach(header => {
+            header.addEventListener('click', (e) => {
+                // Don't toggle if clicking on buttons
+                if (e.target.classList.contains('submission-btn')) return;
+                
+                const submission = header.parentElement;
+                submission.classList.toggle('expanded');
+            });
+        });
+
+        // View buttons
+        const viewButtons = document.querySelectorAll('.view-btn');
+        viewButtons.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const id = btn.dataset.id;
+                this.viewSubmission(id);
+            });
+        });
+
+        // Delete buttons
+        const deleteButtons = document.querySelectorAll('.delete-btn');
+        deleteButtons.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const id = btn.dataset.id;
+                this.deleteSubmission(id);
+            });
+        });
+    }
+
+    viewSubmission(id) {
+        const submission = this.submissions.find(sub => sub.id === id);
+        if (!submission) return;
+
+        // Save to sessionStorage for results page
+        sessionStorage.setItem('simulationResult', JSON.stringify(submission.result));
+        sessionStorage.setItem('originalCode', submission.code);
+        sessionStorage.setItem('ticks', submission.ticks.toString());
+
+        // Navigate to results page
+        window.location.href = 'results.html';
+    }
+
+    deleteSubmission(id) {
+        if (!confirm('Are you sure you want to delete this submission?')) return;
+
+        this.submissions = this.submissions.filter(sub => sub.id !== id);
+        localStorage.setItem('riscv_submissions', JSON.stringify(this.submissions));
+        this.renderSubmissions();
+    }
+
+    clearAll() {
+        if (!confirm('Are you sure you want to delete all submissions? This cannot be undone.')) return;
+
+        this.submissions = [];
+        localStorage.removeItem('riscv_submissions');
+        this.renderSubmissions();
+    }
+
+    getSubmissions() {
+        try {
+            const stored = localStorage.getItem('riscv_submissions');
+            return stored ? JSON.parse(stored) : [];
+        } catch (error) {
+            console.error('Error loading submissions:', error);
+            return [];
+        }
+    }
+
+    showFetchModal() {
+        const modal = document.getElementById('fetch-modal');
+        const input = document.getElementById('submission-id');
+        if (modal && input) {
+            modal.style.display = 'flex';
+            input.value = '';
+            input.focus();
+        }
+    }
+
+    hideFetchModal() {
+        const modal = document.getElementById('fetch-modal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+    }
+
+    async fetchSubmissionById() {
+        const input = document.getElementById('submission-id');
+        const id = input?.value?.trim();
+        
+        if (!id) {
+            alert('Please enter a submission ID');
+            return;
+        }
+
+        const fetchBtn = document.getElementById('fetch-btn');
+        const originalText = fetchBtn.textContent;
+        
+        try {
+            fetchBtn.textContent = 'Polling...';
+            fetchBtn.disabled = true;
+
+            let result = null;
+            let attempts = 0;
+            const maxAttempts = 15;
+
+            while (attempts < maxAttempts) {
+                const response = await fetch(`/api/submission?ulid=${encodeURIComponent(id)}`);
+                
+                if (response.ok) {
+                    result = await response.json();
+                    break;
+                }
+                
+                if (response.status !== 404) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                attempts++;
+            }
+
+            if (!result) {
+                alert('Submission not found after polling');
+                return;
+            }
+
+            // Check if the result contains a simulator error
+            if (result.error) {
+                alert('Simulation error: ' + result.error);
+                return;
+            }
+            
+            // Save to sessionStorage for results page
+            sessionStorage.setItem('simulationResult', JSON.stringify(result));
+            sessionStorage.setItem('originalCode', result.code || '');
+            sessionStorage.setItem('ticks', (result.ticks || 0).toString());
+
+            // Navigate to results page
+            window.location.href = 'results.html';
+
+        } catch (error) {
+            console.error('Error fetching submission:', error);
+            alert('Error fetching submission');
+        } finally {
+            fetchBtn.textContent = originalText;
+            fetchBtn.disabled = false;
+        }
+    }
+
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
 }
 
@@ -200,18 +633,16 @@ class ResultsPage {
     }
 
     renderResults() {
-        const container = document.querySelector('.results-container');
+        // Update ticks display
+        const ticksDisplay = document.getElementById('ticks-display');
+        if (ticksDisplay) {
+            ticksDisplay.textContent = this.ticks;
+        }
+
+        const container = document.getElementById('results-content');
         if (!container) return;
 
         container.innerHTML = `
-            <div class="results-header">
-                <div>
-                    <h1>Simulation Results</h1>
-                    <p>Number of ticks: ${this.ticks}</p>
-                </div>
-                <a href="/" class="back-btn">← Back</a>
-            </div>
-
             <div class="original-code">
                 <h2>Source Code:</h2>
                 ${this.originalCode ? `<pre><code>${this.escapeHtml(this.originalCode)}</code></pre>` : '<p style="color: #666; font-style: italic;">No source code available</p>'}
@@ -861,6 +1292,87 @@ class ResultsPage {
         return JSON.stringify(value);
     }
 
+    showFetchModal() {
+        const modal = document.getElementById('fetch-modal');
+        const input = document.getElementById('submission-id');
+        if (modal && input) {
+            modal.style.display = 'flex';
+            input.value = '';
+            input.focus();
+        }
+    }
+
+    hideFetchModal() {
+        const modal = document.getElementById('fetch-modal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+    }
+
+    async fetchSubmissionById() {
+        const input = document.getElementById('submission-id');
+        const id = input?.value?.trim();
+        
+        if (!id) {
+            alert('Please enter a submission ID');
+            return;
+        }
+
+        const fetchBtn = document.getElementById('fetch-btn');
+        const originalText = fetchBtn.textContent;
+        
+        try {
+            fetchBtn.textContent = 'Polling...';
+            fetchBtn.disabled = true;
+
+            let result = null;
+            let attempts = 0;
+            const maxAttempts = 60;
+
+            while (attempts < maxAttempts) {
+                const response = await fetch(`/api/submission?ulid=${encodeURIComponent(id)}`);
+                
+                if (response.ok) {
+                    result = await response.json();
+                    break;
+                }
+                
+                if (response.status !== 404) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                attempts++;
+            }
+
+            if (!result) {
+                alert('Submission not found after polling');
+                return;
+            }
+
+            // Check if the result contains a simulator error
+            if (result.error) {
+                alert('Simulation error: ' + result.error);
+                return;
+            }
+            
+            // Save to sessionStorage for results page
+            sessionStorage.setItem('simulationResult', JSON.stringify(result));
+            sessionStorage.setItem('originalCode', result.code || '');
+            sessionStorage.setItem('ticks', (result.ticks || 0).toString());
+
+            // Navigate to results page
+            window.location.href = 'results.html';
+
+        } catch (error) {
+            console.error('Error fetching submission:', error);
+            alert('Error fetching submission');
+        } finally {
+            fetchBtn.textContent = originalText;
+            fetchBtn.disabled = false;
+        }
+    }
+
     escapeHtml(text) {
         const div = document.createElement('div');
         div.textContent = text;
@@ -886,6 +1398,8 @@ class ResultsPage {
 document.addEventListener('DOMContentLoaded', () => {
     if (window.location.pathname.endsWith('results.html')) {
         new ResultsPage();
+    } else if (window.location.pathname.endsWith('submissions.html')) {
+        new SubmissionsPage();
     } else {
         new RISCVSimulator();
     }

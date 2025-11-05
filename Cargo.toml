@@ -12,7 +12,7 @@ name = "risc-v-sim-web"
 path = "src/main.rs"
 
 [dependencies]
-axum = { version = "0.8.6", features = ["multipart"] }
+axum = { version = "0.8.6", features = ["multipart", "query"] }
 tokio = { version = "1.48.0", features=[ "rt-multi-thread", "process", "fs" ] }
 tempfile = "3.19.1"
 serde_json = "1.0"
@@ -22,6 +22,9 @@ tracing = "0.1.41"
 tracing-subscriber = "0.3.2"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["fs", "cors"] }
+uuid = { version = "1.18.1", features = ["v4"] }
+ulid = "1.2.1"
+serde = { version = "1.0.228", features = ["derive"] }
 
 [dev-dependencies]
 reqwest = { version = "0.12.24", features = ["multipart", "stream"] }
