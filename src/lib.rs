@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use axum::{
     Router,
-    extract::{Multipart, Query, multipart::Field, State},
+    extract::{Multipart, Query, State, multipart::Field},
     http::StatusCode,
     response::Json,
     routing::{get, post},
@@ -147,13 +147,14 @@ async fn ticks_from_field(field: Field<'_>) -> Result<u32> {
     Ok(ticks_str.parse()?)
 }
 
-async fn simulate(file_content: bytes::Bytes,
-                  path: PathBuf,
-                  as_binary: String,
-                  ld_binary: String,
-                  simulator_binary: String,
-                  ticks: u32,
-                  ulid: Ulid
+async fn simulate(
+    file_content: bytes::Bytes,
+    path: PathBuf,
+    as_binary: String,
+    ld_binary: String,
+    simulator_binary: String,
+    ticks: u32,
+    ulid: Ulid,
 ) -> Json<serde_json::Value> {
     match timeout(
         Duration::from_secs(5),
@@ -212,10 +213,7 @@ async fn simulate(file_content: bytes::Bytes,
                             .to_string(),
                     ),
                 );
-                map.insert(
-                    "ticks".to_string(),
-                    json!(ticks)
-                );
+                map.insert("ticks".to_string(), json!(ticks));
             }
             return Json(json);
         }
@@ -235,11 +233,11 @@ async fn submit_handler(
     let ulid;
     let path;
 
-    let AppState { 
+    let AppState {
         as_binary,
         ld_binary,
         simulator_binary,
-        submissions_folder
+        submissions_folder,
     } = state;
 
     loop {
@@ -287,19 +285,29 @@ async fn submit_handler(
         file_content.len()
     );
 
-    tokio::spawn(
-        async move {
-            let path2 = path.clone();
-            let Json(json): Json<serde_json::Value> = simulate(file_content, path, as_binary, ld_binary, simulator_binary, ticks, ulid).await;
-            if let Err(e) = fs::write(path2.join("simulation.json"), json.to_string()).await {
-                error!("couldn't write simulation.json at {:#?}: {e}", &path2);
-            };
-        }
-    );
+    tokio::spawn(async move {
+        let path2 = path.clone();
+        let Json(json): Json<serde_json::Value> = simulate(
+            file_content,
+            path,
+            as_binary,
+            ld_binary,
+            simulator_binary,
+            ticks,
+            ulid,
+        )
+        .await;
+        if let Err(e) = fs::write(path2.join("simulation.json"), json.to_string()).await {
+            error!("couldn't write simulation.json at {:#?}: {e}", &path2);
+        };
+    });
 
-    (StatusCode::ACCEPTED, Json(json!({
-        "ulid": ulid.to_string()
-    })))
+    (
+        StatusCode::ACCEPTED,
+        Json(json!({
+            "ulid": ulid.to_string()
+        })),
+    )
 }
 
 async fn submission_handler(
@@ -310,7 +318,7 @@ async fn submission_handler(
         as_binary: _,
         ld_binary: _,
         simulator_binary: _,
-        submissions_folder
+        submissions_folder,
     } = state;
 
     let ulid = submission.0.ulid;
@@ -340,7 +348,7 @@ async fn submission_handler(
     let exists = exists.unwrap();
     if !exists {
         return (StatusCode::NOT_FOUND, Json(serde_json::Value::Null));
-    } 
+    }
     let content = fs::read(path).await;
     if let Err(e) = content {
         error!("{e}");
@@ -368,9 +376,12 @@ pub fn create_app() -> Router {
         std::env::var("SIMULATOR_BINARY").unwrap_or_else(|_| "simulator".to_string());
     let submissions_folder =
         std::env::var("SUBMISSIONS_FOLDER").unwrap_or_else(|_| "submission".to_string());
-    
+
     let state = AppState {
-        as_binary, ld_binary, simulator_binary, submissions_folder
+        as_binary,
+        ld_binary,
+        simulator_binary,
+        submissions_folder,
     };
 
     Router::new()
