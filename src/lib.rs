@@ -1,13 +1,13 @@
 use anyhow::{Context, Result, bail};
 use axum::{
     Router,
-    extract::{Multipart, Query, multipart::Field},
+    extract::{Multipart, Query, multipart::Field, State},
     http::StatusCode,
     response::Json,
     routing::{get, post},
 };
 use serde::Deserialize;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::fs;
 use tokio::process::Command;
@@ -16,6 +16,14 @@ use tower::ServiceBuilder;
 use tower_http::services::ServeDir;
 use tracing::{error, info};
 use ulid::Ulid;
+
+#[derive(Clone)]
+struct AppState {
+    as_binary: String,
+    ld_binary: String,
+    simulator_binary: String,
+    submissions_folder: String,
+}
 
 #[derive(Deserialize)]
 pub struct Submission {
@@ -138,17 +146,19 @@ async fn ticks_from_field(field: Field<'_>) -> Result<u32> {
     Ok(ticks_str.parse()?)
 }
 
-async fn submit_handler_template(
-    as_binary: String,
-    ld_binary: String,
-    simulator_binary: String,
-    submissions_folder: impl AsRef<Path>,
+async fn submit_handler(
+    State(state): State<AppState>,
     multipart: Multipart,
 ) -> (StatusCode, Json<serde_json::Value>) {
     let ulid;
     let path;
 
-    let submissions_folder = submissions_folder.as_ref();
+    let AppState { 
+        as_binary,
+        ld_binary,
+        simulator_binary,
+        submissions_folder
+    } = state;
 
     loop {
         let definetly_new_ulid = Ulid::new();
@@ -282,12 +292,20 @@ async fn submit_handler_template(
     }
 }
 
-async fn submission_handler_template(
-    submission_folder: impl AsRef<Path>,
+async fn submission_handler(
+    State(state): State<AppState>,
     submission: Query<Submission>,
 ) -> (axum::http::StatusCode, Json<serde_json::Value>) {
+    let AppState {
+        as_binary: _,
+        ld_binary: _,
+        simulator_binary: _,
+        submissions_folder
+    } = state;
+
     let ulid = submission.0.ulid;
     let ulid = Ulid::from_string(&ulid);
+
     match ulid {
         Err(e) => {
             error!("{e}");
@@ -299,8 +317,7 @@ async fn submission_handler_template(
             )
         }
         Ok(ulid) => {
-            let path = submission_folder
-                .as_ref()
+            let path = PathBuf::from(submissions_folder)
                 .join(ulid.to_string())
                 .join("simulation.json");
             let exists = fs::try_exists(&path).await;
@@ -347,29 +364,9 @@ pub fn create_app() -> Router {
         std::env::var("SIMULATOR_BINARY").unwrap_or_else(|_| "simulator".to_string());
     let submissions_folder =
         std::env::var("SUBMISSIONS_FOLDER").unwrap_or_else(|_| "submission".to_string());
-
-    let submissions_folder_clone = submissions_folder.clone();
-
-    let submit_handler = move |multipart: Multipart| {
-        let as_binary = as_binary.clone();
-        let ld_binary = ld_binary.clone();
-        let simulator_binary = simulator_binary.clone();
-        let submissions_folder = submissions_folder_clone.clone();
-        async move {
-            submit_handler_template(
-                as_binary,
-                ld_binary,
-                simulator_binary,
-                submissions_folder,
-                multipart,
-            )
-            .await
-        }
-    };
-
-    let submission_handler = move |submission: Query<Submission>| {
-        let submissions_folder = submissions_folder.clone();
-        async move { submission_handler_template(submissions_folder, submission).await }
+    
+    let state = AppState {
+        as_binary, ld_binary, simulator_binary, submissions_folder
     };
 
     Router::new()
@@ -382,6 +379,7 @@ pub fn create_app() -> Router {
         )
         .fallback_service(ServeDir::new("static"))
         .layer(ServiceBuilder::new().layer(tower_http::cors::CorsLayer::permissive()))
+        .with_state(state)
 }
 
 #[cfg(test)]
