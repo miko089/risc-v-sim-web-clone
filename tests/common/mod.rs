@@ -5,10 +5,11 @@ use reqwest::Url;
 use tracing::{Level, info};
 
 pub fn init_test() {
-    tracing_subscriber::fmt()
+    // Tests run in parallel, so some might have already created the logger.
+    let _ = tracing_subscriber::fmt()
         .with_level(true)
         .with_max_level(Level::DEBUG)
-        .init();
+        .try_init();
 }
 
 /// Spawns a risc-v-sim-web instance, listening on the specified port.
