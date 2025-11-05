@@ -15,6 +15,7 @@ async fn main() {
     info!("Listening on port {port}");
 
     risc_v_sim_web::run(
+        tracing::info_span!("rvsim-web"),
         listener,
         risc_v_sim_web::Config {
             as_binary: std::env::var("AS_BINARY")

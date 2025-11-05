@@ -1,8 +1,24 @@
 use std::net::{Ipv4Addr, SocketAddrV4};
-use tokio::task::JoinHandle;
+use tokio::{net::TcpListener, task::JoinHandle};
 
 use reqwest::Url;
-use tracing::{Level, info};
+use tracing::{Instrument, Level, Span, info};
+
+pub async fn run_test<Patch, Body, F>(test_name: &str, patch_cfg: Patch, body: Body)
+where
+    Patch: FnOnce(&mut risc_v_sim_web::Config),
+    Body: FnOnce(u16) -> F,
+    F: Future<Output = ()>,
+{
+    init_test();
+    let mut cfg = default_config(test_name);
+    patch_cfg(&mut cfg);
+
+    let span = tracing::info_span!("test", test_name = test_name);
+    let (port, server_task) = spawn_server(&span, cfg).await;
+    body(port).instrument(span).await;
+    server_task.abort();
+}
 
 pub fn init_test() {
     // Tests run in parallel, so some might have already created the logger.
@@ -17,7 +33,13 @@ pub fn init_test() {
 /// avoid any weird bugs.
 /// The function returns a JoinHandle. For quick and clean test termination,
 /// make sure to [`JoinHandle::abort()`] the returned future.
-pub async fn spawn_server(cfg: risc_v_sim_web::Config) -> (u16, JoinHandle<()>) {
+pub async fn spawn_server(span: &Span, cfg: risc_v_sim_web::Config) -> (u16, JoinHandle<()>) {
+    let (port, listener) = make_listener().instrument(span.clone()).await;
+    let task = tokio::spawn(risc_v_sim_web::run(span.clone(), listener, cfg));
+    (port, task)
+}
+
+async fn make_listener() -> (u16, TcpListener) {
     // NOTE: we specifically create a listener on the same thread and make the
     //       caller wait. This is because we want to make sure the server properly
     //       reserves the port. Otherwise the caller's HTTP requests will race
@@ -26,12 +48,10 @@ pub async fn spawn_server(cfg: risc_v_sim_web::Config) -> (u16, JoinHandle<()>) 
     let listener = tokio::net::TcpListener::bind(address).await.unwrap();
     let port = listener.local_addr().unwrap().port();
     info!("Listening on port {port}");
-
-    let task = tokio::spawn(risc_v_sim_web::run(listener, cfg));
-    (port, task)
+    (port, listener)
 }
 
-pub fn default_config(testname: &str) -> risc_v_sim_web::Config {
+pub fn default_config(test_name: &str) -> risc_v_sim_web::Config {
     risc_v_sim_web::Config {
         as_binary: std::env::var("AS_BINARY")
             .unwrap_or_else(|_| "riscv64-elf-as".to_string())
@@ -42,7 +62,7 @@ pub fn default_config(testname: &str) -> risc_v_sim_web::Config {
         simulator_binary: std::env::var("SIMULATOR_BINARY")
             .unwrap_or_else(|_| "simulator".to_string())
             .into(),
-        submissions_folder: format!("submissions-{testname}").into(),
+        submissions_folder: format!("submissions-{test_name}").into(),
     }
 }
 

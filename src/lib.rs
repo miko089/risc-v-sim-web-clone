@@ -1,8 +1,9 @@
 use anyhow::{Context, Result, bail};
 use axum::{
     Router,
+    body::Body,
     extract::{Multipart, Query, State, multipart::Field},
-    http::StatusCode,
+    http::{Request, StatusCode},
     response::Json,
     routing::{get, post},
 };
@@ -18,7 +19,7 @@ use tokio::time::timeout;
 use tokio::{fs, net::TcpListener};
 use tower::ServiceBuilder;
 use tower_http::{services::ServeDir, trace::TraceLayer};
-use tracing::{error, info};
+use tracing::{Instrument, error, info, info_span};
 use ulid::Ulid;
 
 #[derive(Deserialize)]
@@ -274,21 +275,24 @@ async fn submit_handler(
         file_content.len()
     );
 
-    tokio::spawn(async move {
-        let Json(json): Json<serde_json::Value> = simulate(
-            file_content,
-            &path,
-            &config.as_binary,
-            &config.ld_binary,
-            &config.simulator_binary,
-            ticks,
-            ulid,
-        )
-        .await;
-        if let Err(e) = fs::write(path.join("simulation.json"), json.to_string()).await {
-            error!("couldn't write simulation.json at {path:?}: {e}");
-        };
-    });
+    tokio::spawn(
+        async move {
+            let Json(json): Json<serde_json::Value> = simulate(
+                file_content,
+                &path,
+                &config.as_binary,
+                &config.ld_binary,
+                &config.simulator_binary,
+                ticks,
+                ulid,
+            )
+            .await;
+            if let Err(e) = fs::write(path.join("simulation.json"), json.to_string()).await {
+                error!("couldn't write simulation.json at {path:?}: {e}");
+            };
+        }
+        .instrument(info_span!(parent: tracing::Span::current(), "submit_task", ulid = %ulid)),
+    );
 
     (
         StatusCode::ACCEPTED,
@@ -358,7 +362,17 @@ pub struct Config {
     pub submissions_folder: PathBuf,
 }
 
-pub async fn run(listener: TcpListener, cfg: Config) {
+pub async fn run(root_span: tracing::Span, listener: TcpListener, cfg: Config) {
+    let def_span = move |request: &Request<Body>| {
+        tracing::debug_span!(
+            parent: &root_span,
+            "request",
+            method = %request.method(),
+            uri = %request.uri(),
+            version = ?request.version(),
+        )
+    };
+
     let state = Arc::new(cfg);
     let router = Router::new()
         .nest(
@@ -370,7 +384,7 @@ pub async fn run(listener: TcpListener, cfg: Config) {
         )
         .fallback_service(ServeDir::new("static"))
         .layer(ServiceBuilder::new().layer(tower_http::cors::CorsLayer::permissive()))
-        .layer(TraceLayer::new_for_http())
+        .layer(TraceLayer::new_for_http().make_span_with(def_span))
         .with_state(state);
 
     axum::serve(listener, router).await.unwrap();
