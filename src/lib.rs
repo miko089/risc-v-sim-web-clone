@@ -7,6 +7,7 @@ use axum::{
     routing::{get, post},
 };
 use serde::Deserialize;
+use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::fs;
@@ -146,6 +147,87 @@ async fn ticks_from_field(field: Field<'_>) -> Result<u32> {
     Ok(ticks_str.parse()?)
 }
 
+async fn simulate(file_content: bytes::Bytes,
+                  path: PathBuf,
+                  as_binary: String,
+                  ld_binary: String,
+                  simulator_binary: String,
+                  ticks: u32,
+                  ulid: Ulid
+) -> Json<serde_json::Value> {
+    match timeout(
+        Duration::from_secs(5),
+        compile_s_to_elf(&file_content, &path, &as_binary, &ld_binary),
+    )
+    .await
+    {
+        Ok(Ok(elf)) => elf,
+        Ok(Err(compilation_error)) => {
+            error!("Compilation failed: {compilation_error:#}");
+            return Json(serde_json::json!({
+                    "error": format!("{compilation_error:#}"),
+            }));
+        }
+        Err(_) => {
+            error!("Compilation timed out");
+            return Json(serde_json::json!({
+                    "error": "compilation timed out",
+            }));
+        }
+    };
+
+    let stdout = match timeout(
+        Duration::from_secs(10),
+        run_simulator(&path, ticks, &simulator_binary),
+    )
+    .await
+    {
+        Ok(Ok(result)) => result,
+        Ok(Err(sim_error)) => {
+            error!("Simulation failed {sim_error:#}");
+            return Json(serde_json::json!({
+                "error": sim_error.to_string()
+            }));
+        }
+        Err(_) => {
+            error!("Simulation timed out");
+            return Json(serde_json::json!({
+                "error": "simulation timed out",
+            }));
+        }
+    };
+
+    match serde_json::from_str::<serde_json::Value>(&stdout) {
+        Ok(mut json) => {
+            if let serde_json::Value::Object(ref mut map) = json {
+                map.insert(
+                    "ulid".to_string(),
+                    serde_json::Value::String(ulid.to_string()),
+                );
+                map.insert(
+                    "code".to_string(),
+                    serde_json::Value::String(
+                        str::from_utf8(&file_content)
+                            .unwrap_or_else(|_| "")
+                            .to_string(),
+                    ),
+                );
+                map.insert(
+                    "ticks".to_string(),
+                    json!(ticks)
+                );
+            }
+            return Json(json);
+        }
+        Err(e) => {
+            error!("Simulator printed malformed JSON: {e}");
+            return Json(serde_json::json!({
+                "error": "Invalid JSON output from simulator"
+            }));
+        }
+    }
+}
+
 async fn submit_handler(
     State(state): State<AppState>,
     multipart: Multipart,
@@ -205,91 +287,19 @@ async fn submit_handler(
         file_content.len()
     );
 
-    match timeout(
-        Duration::from_secs(5),
-        compile_s_to_elf(&file_content, &path, &as_binary, &ld_binary),
-    )
-    .await
-    {
-        Ok(Ok(elf)) => elf,
-        Ok(Err(compilation_error)) => {
-            error!("Compilation failed: {compilation_error:#}");
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({
-                    "error": format!("{compilation_error:#}"),
-                })),
-            );
-        }
-        Err(_) => {
-            error!("Compilation timed out");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "error": "compilation timed out",
-                })),
-            );
-        }
-    };
-
-    let stdout = match timeout(
-        Duration::from_secs(10),
-        run_simulator(&path, ticks, &simulator_binary),
-    )
-    .await
-    {
-        Ok(Ok(result)) => result,
-        Ok(Err(sim_error)) => {
-            error!("Simulation failed {sim_error:#}");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "error": sim_error.to_string()
-                })),
-            );
-        }
-        Err(_) => {
-            error!("Simulation timed out");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "error": "simulation timed out",
-                })),
-            );
-        }
-    };
-
-    match serde_json::from_str::<serde_json::Value>(&stdout) {
-        Ok(mut json) => {
-            if let serde_json::Value::Object(ref mut map) = json {
-                map.insert(
-                    "ulid".to_string(),
-                    serde_json::Value::String(ulid.to_string()),
-                );
-                map.insert(
-                    "code".to_string(),
-                    serde_json::Value::String(
-                        str::from_utf8(&file_content)
-                            .unwrap_or_else(|_| "")
-                            .to_string(),
-                    ),
-                );
-            }
-            if let Err(e) = fs::write(path.join("simulation.json"), json.to_string()).await {
-                error!("couldn't write simulation.json at {:#?}: {e}", &path);
+    tokio::spawn(
+        async move {
+            let path2 = path.clone();
+            let Json(json): Json<serde_json::Value> = simulate(file_content, path, as_binary, ld_binary, simulator_binary, ticks, ulid).await;
+            if let Err(e) = fs::write(path2.join("simulation.json"), json.to_string()).await {
+                error!("couldn't write simulation.json at {:#?}: {e}", &path2);
             };
-            (StatusCode::OK, Json(json))
         }
-        Err(e) => {
-            error!("Simulator printed malformed JSON: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "error": "Invalid JSON output from simulator"
-                })),
-            )
-        }
-    }
+    );
+
+    (StatusCode::ACCEPTED, Json(json!({
+        "ulid": ulid.to_string()
+    })))
 }
 
 async fn submission_handler(
