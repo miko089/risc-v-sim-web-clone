@@ -2,8 +2,7 @@ use std::net::{Ipv4Addr, SocketAddrV4};
 use tokio::task::JoinHandle;
 
 use reqwest::Url;
-use tower_http::trace::TraceLayer;
-use tracing::Level;
+use tracing::{Level, info};
 
 pub fn init_test() {
     tracing_subscriber::fmt()
@@ -17,18 +16,35 @@ pub fn init_test() {
 /// avoid any weird bugs.
 /// The function returns a JoinHandle. For quick and clean test termination,
 /// make sure to [`JoinHandle::abort()`] the returned future.
-pub async fn spawn_server(port: u16) -> JoinHandle<()> {
+pub async fn spawn_server(cfg: risc_v_sim_web::Config) -> (u16, JoinHandle<()>) {
     // NOTE: we specifically create a listener on the same thread and make the
     //       caller wait. This is because we want to make sure the server properly
     //       reserves the port. Otherwise the caller's HTTP requests will race
     //       and get a "connection refused" response.
-    let addr = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port);
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    let address = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
+    let listener = tokio::net::TcpListener::bind(address).await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    info!("Listening on port {port}");
 
-    tokio::spawn(async move {
-        let app = risc_v_sim_web::create_app().layer(TraceLayer::new_for_http());
-        axum::serve(listener, app).await.unwrap();
-    })
+    let task = tokio::spawn(risc_v_sim_web::run(listener, cfg));
+    (port, task)
+}
+
+pub fn default_config() -> risc_v_sim_web::Config {
+    risc_v_sim_web::Config {
+        as_binary: std::env::var("AS_BINARY")
+            .unwrap_or_else(|_| "riscv64-elf-as".to_string())
+            .into(),
+        ld_binary: std::env::var("LD_BINARY")
+            .unwrap_or_else(|_| "riscv64-elf-ld".to_string())
+            .into(),
+        simulator_binary: std::env::var("SIMULATOR_BINARY")
+            .unwrap_or_else(|_| "simulator".to_string())
+            .into(),
+        submissions_folder: std::env::var("SUBMISSIONS_FOLDER")
+            .unwrap_or_else(|_| "submission".to_string())
+            .into(),
+    }
 }
 
 /// Returns the server url.
