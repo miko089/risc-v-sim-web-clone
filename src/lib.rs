@@ -14,9 +14,9 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tokio::process::Command;
 use tokio::time::timeout;
 use tokio::{fs, net::TcpListener};
+use tokio::{io::AsyncWriteExt, process::Command};
 use tower::ServiceBuilder;
 use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing::{Instrument, error, info, info_span};
@@ -43,7 +43,10 @@ pub async fn compile_s_to_elf(
     let elf_path = dir.join("output.elf");
 
     info!("Writing program to {s_path:?}");
-    fs::write(&s_path, s_content).await?;
+    let mut file = fs::File::create_new(&s_path)
+        .await
+        .context("writing source code")?;
+    file.write_all(s_content).await?;
 
     info!("Compiling {s_path:?} to object file {o_path:?}");
     let as_output = Command::new(as_binary.as_ref())
