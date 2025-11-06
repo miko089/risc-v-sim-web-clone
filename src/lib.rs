@@ -56,12 +56,12 @@ pub async fn compile_s_to_elf(
         .kill_on_drop(true)
         .output()
         .await
-        .context("copmiling")?;
+        .context("assembling")?;
 
     if !as_output.status.success() {
         let stderr = String::from_utf8_lossy(&as_output.stderr);
         let stdout = String::from_utf8_lossy(&as_output.stdout);
-        return Err(anyhow::anyhow!("Assembler error:\n{}\n{}", stderr, stdout));
+        bail!("Assembler error:\n{}\n{}", stderr, stdout);
     }
 
     info!("Linking {o_path:?} to elf {elf_path:?}");
@@ -78,7 +78,7 @@ pub async fn compile_s_to_elf(
     if !ld_output.status.success() {
         let stderr = String::from_utf8_lossy(&ld_output.stderr);
         let stdout = String::from_utf8_lossy(&ld_output.stdout);
-        return Err(anyhow::anyhow!("Linker error:\n{}\n{}", stderr, stdout));
+        bail!("Linker error:\n{}\n{}", stderr, stdout);
     }
 
     info!("Elf ready");
@@ -154,75 +154,44 @@ async fn simulate(
     simulator_binary: impl AsRef<Path>,
     ticks: u32,
     ulid: Ulid,
-) -> Json<serde_json::Value> {
-    match timeout(
+) -> Result<serde_json::Value> {
+    future_with_timeout(
         Duration::from_secs(5),
         compile_s_to_elf(&file_content, &path, &as_binary, &ld_binary),
     )
     .await
-    {
-        Ok(Ok(elf)) => elf,
-        Ok(Err(compilation_error)) => {
-            error!("Compilation failed: {compilation_error:#}");
-            return Json(serde_json::json!({
-                    "error": format!("{compilation_error:#}"),
-            }));
-        }
-        Err(_) => {
-            error!("Compilation timed out");
-            return Json(serde_json::json!({
-                    "error": "compilation timed out",
-            }));
-        }
-    };
+    .context("compilation")?;
 
-    let stdout = match timeout(
+    let stdout = future_with_timeout(
         Duration::from_secs(10),
         run_simulator(&path, ticks, &simulator_binary),
     )
     .await
-    {
-        Ok(Ok(result)) => result,
-        Ok(Err(sim_error)) => {
-            error!("Simulation failed {sim_error:#}");
-            return Json(serde_json::json!({
-                "error": sim_error.to_string()
-            }));
-        }
-        Err(_) => {
-            error!("Simulation timed out");
-            return Json(serde_json::json!({
-                "error": "simulation timed out",
-            }));
-        }
-    };
+    .context("simulation")?;
 
-    match serde_json::from_str::<serde_json::Value>(&stdout) {
-        Ok(mut json) => {
-            if let serde_json::Value::Object(ref mut map) = json {
-                map.insert(
-                    "ulid".to_string(),
-                    serde_json::Value::String(ulid.to_string()),
-                );
-                map.insert(
-                    "code".to_string(),
-                    serde_json::Value::String(
-                        str::from_utf8(&file_content)
-                            .unwrap_or_else(|_| "")
-                            .to_string(),
-                    ),
-                );
-                map.insert("ticks".to_string(), json!(ticks));
-            }
-            return Json(json);
-        }
-        Err(e) => {
-            error!("Simulator printed malformed JSON: {e}");
-            return Json(serde_json::json!({
-                "error": "Invalid JSON output from simulator"
-            }));
-        }
+    let mut json = serde_json::from_str(&stdout).context("parse simulation output")?;
+    if let serde_json::Value::Object(ref mut map) = json {
+        map.insert(
+            "ulid".to_string(),
+            serde_json::Value::String(ulid.to_string()),
+        );
+        map.insert(
+            "code".to_string(),
+            serde_json::Value::String(String::from_utf8_lossy(&file_content).to_string()),
+        );
+        map.insert("ticks".to_string(), json!(ticks));
     }
+    Ok(json)
+}
+
+async fn future_with_timeout<T>(
+    duration: Duration,
+    f: impl Future<Output = Result<T>>,
+) -> Result<T> {
+    timeout(duration, f)
+        .await
+        .map_err(anyhow::Error::from)
+        .flatten()
 }
 
 async fn submit_handler(
@@ -258,7 +227,7 @@ async fn submit_handler(
 
     tokio::spawn(
         async move {
-            let Json(json): Json<serde_json::Value> = simulate(
+            let res = simulate(
                 file_content,
                 &submission_dir,
                 &config.as_binary,
@@ -267,10 +236,15 @@ async fn submit_handler(
                 ticks,
                 ulid,
             )
-            .await;
-            if let Err(e) =
-                fs::write(submission_dir.join("simulation.json"), json.to_string()).await
-            {
+            .await
+            .unwrap_or_else(|e| {
+                error!("Simulation task failed: {e:?}");
+                serde_json::json!({
+                    "error": format!("{e:?}"),
+                })
+            });
+
+            if let Err(e) = fs::write(submission_file(&config, ulid), res.to_string()).await {
                 error!("couldn't write simulation.json at {submission_dir:?}: {e}");
             };
         }
