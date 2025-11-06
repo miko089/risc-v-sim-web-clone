@@ -226,32 +226,13 @@ async fn submit_handler(
     State(config): State<Arc<Config>>,
     multipart: Multipart,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let ulid;
-    let path;
+    let ulid = Ulid::new();
+    let mut buf = [0u8; ULID_LEN];
+    let ulid_str = ulid.array_to_str(&mut buf);
+    let submission_dir = config.submissions_folder.join(&ulid_str);
 
-    loop {
-        let definetly_new_ulid = Ulid::new();
-        let definetly_new_path = config
-            .submissions_folder
-            .join(definetly_new_ulid.to_string());
-        let exists = fs::try_exists(&definetly_new_path).await;
-        if let Err(e) = exists {
-            error!("can't access {:#?}: {e}", &definetly_new_path);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json::from(serde_json::Value::Null),
-            );
-        }
-        let exists = exists.unwrap();
-        if !exists {
-            ulid = definetly_new_ulid;
-            path = definetly_new_path;
-            break;
-        }
-    }
-
-    if let Err(e) = fs::create_dir_all(&path).await {
-        error!("can't create {:#?}: {e}", path);
+    if let Err(e) = fs::create_dir_all(&submission_dir).await {
+        error!("can't create {:#?}: {e}", submission_dir);
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json::from(serde_json::Value::Null),
@@ -279,7 +260,7 @@ async fn submit_handler(
         async move {
             let Json(json): Json<serde_json::Value> = simulate(
                 file_content,
-                &path,
+                &submission_dir,
                 &config.as_binary,
                 &config.ld_binary,
                 &config.simulator_binary,
@@ -287,8 +268,8 @@ async fn submit_handler(
                 ulid,
             )
             .await;
-            if let Err(e) = fs::write(path.join("simulation.json"), json.to_string()).await {
-                error!("couldn't write simulation.json at {path:?}: {e}");
+            if let Err(e) = fs::write(submission_dir.join("simulation.json"), json.to_string()).await {
+                error!("couldn't write simulation.json at {submission_dir:?}: {e}");
             };
         }
         .instrument(info_span!(parent: tracing::Span::current(), "submit_task", ulid = %ulid)),
@@ -297,7 +278,7 @@ async fn submit_handler(
     (
         StatusCode::ACCEPTED,
         Json(json!({
-            "ulid": ulid.to_string()
+            "ulid": ulid
         })),
     )
 }
