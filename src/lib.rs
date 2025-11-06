@@ -32,10 +32,9 @@ pub async fn health_handler() -> &'static str {
 }
 
 pub async fn compile_s_to_elf(
+    config: &Config,
     s_content: &[u8],
     submission_dir: impl AsRef<Path>,
-    as_binary: impl AsRef<Path>,
-    ld_binary: impl AsRef<Path>,
 ) -> Result<()> {
     let dir = submission_dir.as_ref();
     let s_path = dir.join("input.s");
@@ -49,7 +48,7 @@ pub async fn compile_s_to_elf(
     file.write_all(s_content).await?;
 
     info!("Compiling {s_path:?} to object file {o_path:?}");
-    let as_output = Command::new(as_binary.as_ref())
+    let as_output = Command::new(&config.as_binary)
         .arg(&s_path)
         .arg("-o")
         .arg(&o_path)
@@ -57,7 +56,6 @@ pub async fn compile_s_to_elf(
         .output()
         .await
         .context("assembling")?;
-
     if !as_output.status.success() {
         let stderr = String::from_utf8_lossy(&as_output.stderr);
         let stdout = String::from_utf8_lossy(&as_output.stdout);
@@ -65,7 +63,7 @@ pub async fn compile_s_to_elf(
     }
 
     info!("Linking {o_path:?} to elf {elf_path:?}");
-    let ld_output = Command::new(ld_binary.as_ref())
+    let ld_output = Command::new(&config.ld_binary)
         .arg(&o_path)
         .arg("-Ttext=0x80000000")
         .arg("-o")
@@ -74,7 +72,6 @@ pub async fn compile_s_to_elf(
         .output()
         .await
         .context("linking")?;
-
     if !ld_output.status.success() {
         let stderr = String::from_utf8_lossy(&ld_output.stderr);
         let stdout = String::from_utf8_lossy(&ld_output.stdout);
@@ -85,16 +82,11 @@ pub async fn compile_s_to_elf(
     Ok(())
 }
 
-pub async fn run_simulator(
-    dir_with_elf: impl AsRef<Path>,
-    ticks: u32,
-    simulator_binary: impl AsRef<Path>,
-) -> Result<String> {
-    let dir_with_elf = dir_with_elf.as_ref();
-    let elf_path = dir_with_elf.join("output.elf");
+pub async fn run_simulator(config: &Config, submission_dir: &Path, ticks: u32) -> Result<String> {
+    let elf_path = submission_dir.join("output.elf");
     info!("Simulating the program at {elf_path:?}");
 
-    let output = Command::new(simulator_binary.as_ref())
+    let output = Command::new(&config.simulator_binary)
         .arg("--ticks")
         .arg(ticks.to_string())
         .arg("--path")
@@ -147,39 +139,34 @@ async fn ticks_from_field(field: Field<'_>) -> Result<u32> {
 }
 
 async fn simulate(
-    file_content: bytes::Bytes,
-    path: impl AsRef<Path>,
-    as_binary: impl AsRef<Path>,
-    ld_binary: impl AsRef<Path>,
-    simulator_binary: impl AsRef<Path>,
-    ticks: u32,
+    config: &Config,
     ulid: Ulid,
+    source_code: bytes::Bytes,
+    ticks: u32,
 ) -> Result<serde_json::Value> {
+    let submission_dir = submission_dir(config, ulid);
     future_with_timeout(
         Duration::from_secs(5),
-        compile_s_to_elf(&file_content, &path, &as_binary, &ld_binary),
+        compile_s_to_elf(config, &source_code, &submission_dir),
     )
     .await
     .context("compilation")?;
 
     let stdout = future_with_timeout(
         Duration::from_secs(10),
-        run_simulator(&path, ticks, &simulator_binary),
+        run_simulator(config, &submission_dir, ticks),
     )
     .await
     .context("simulation")?;
 
     let mut json = serde_json::from_str(&stdout).context("parse simulation output")?;
-    if let serde_json::Value::Object(ref mut map) = json {
-        map.insert(
-            "ulid".to_string(),
-            serde_json::Value::String(ulid.to_string()),
-        );
+    if let serde_json::Value::Object(map) = &mut json {
+        map.insert("ulid".to_string(), json!(ulid));
+        map.insert("ticks".to_string(), json!(ticks));
         map.insert(
             "code".to_string(),
-            serde_json::Value::String(String::from_utf8_lossy(&file_content).to_string()),
+            json!(String::from_utf8_lossy(&source_code)),
         );
-        map.insert("ticks".to_string(), json!(ticks));
     }
     Ok(json)
 }
@@ -198,7 +185,7 @@ async fn submit_handler(
     State(config): State<Arc<Config>>,
     multipart: Multipart,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let (ticks, file_content) = match parse_submit_inputs(multipart).await.context("parse input") {
+    let (ticks, source_code) = match parse_submit_inputs(multipart).await.context("parse input") {
         Ok(x) => x,
         Err(e) => {
             info!("Bad request: {e:#}");
@@ -212,7 +199,7 @@ async fn submit_handler(
     };
     info!(
         "Received {} bytes of program code to run for {ticks} ticks",
-        file_content.len()
+        source_code.len()
     );
 
     let ulid = Ulid::new();
@@ -227,25 +214,17 @@ async fn submit_handler(
 
     tokio::spawn(
         async move {
-            let res = simulate(
-                file_content,
-                &submission_dir,
-                &config.as_binary,
-                &config.ld_binary,
-                &config.simulator_binary,
-                ticks,
-                ulid,
-            )
-            .await
-            .unwrap_or_else(|e| {
-                error!("Simulation task failed: {e:?}");
-                serde_json::json!({
-                    "error": format!("{e:?}"),
-                })
-            });
+            let res = simulate(&config, ulid, source_code, ticks)
+                .await
+                .unwrap_or_else(|e| {
+                    error!("Simulation task failed: {e:?}");
+                    serde_json::json!({
+                        "error": format!("{e:?}"),
+                    })
+                });
 
             if let Err(e) = fs::write(submission_file(&config, ulid), res.to_string()).await {
-                error!("couldn't write simulation.json at {submission_dir:?}: {e}");
+                error!("failed to write submission result: {e}");
             };
         }
         .instrument(info_span!(parent: tracing::Span::current(), "submit_task", ulid = %ulid)),
