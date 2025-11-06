@@ -1,11 +1,15 @@
 mod common;
 use common::*;
 
+use tokio::task::JoinSet;
 use ulid::Ulid;
 
 use reqwest::{Client, Response};
-use std::time::Duration;
-use tracing::info;
+use std::{path::Path, time::Duration};
+use tracing::{Instrument, info, info_span};
+
+const WAIT_TIMEOUT: f32 = 5.0;
+const CONCURRENCY: usize = 5;
 
 #[derive(serde::Deserialize)]
 struct SubmitResponse {
@@ -37,20 +41,7 @@ async fn submit_and_wait() {
         "submit_and_wait",
         |_| {},
         async |port| {
-            let client = reqwest::Client::new();
-            let submit_response = submit_program(&client, port, 5, "samples/basic.s").await;
-            let submit_status = submit_response.status();
-            assert_eq!(submit_status, reqwest::StatusCode::ACCEPTED);
-
-            let response_bytes = submit_response.bytes().await.unwrap();
-            let response = serde_json::from_slice::<SubmitResponse>(&response_bytes).unwrap();
-            info!("Got submission id: {}", response.ulid);
-
-            let submission_id = response.ulid;
-            let timeout = Duration::from_secs_f32(5.0);
-            tokio::time::timeout(timeout, wait_submission(&client, port, submission_id))
-                .await
-                .unwrap();
+            make_submission_and_wait_for_success(port, 5, "samples/basic.s").await;
         },
     )
     .await;
@@ -69,6 +60,43 @@ async fn submit_non_existent() {
         },
     )
     .await;
+}
+
+#[tokio::test]
+async fn submit_concurrent() {
+    run_test(
+        "submit_concurrent",
+        |_| {},
+        async |port| {
+            let set = (0..CONCURRENCY)
+                .map(|id| {
+                    tokio::spawn(
+                        make_submission_and_wait_for_success(port, 5, "samples/basic.s")
+                            .instrument(info_span!("concurrent_client", id = id)),
+                    )
+                })
+                .collect::<JoinSet<_>>();
+            set.join_all().await;
+        },
+    )
+    .await;
+}
+
+async fn make_submission_and_wait_for_success(port: u16, ticks: u32, path: impl AsRef<Path>) {
+    let client = reqwest::Client::new();
+    let submit_response = submit_program(&client, port, ticks, path).await;
+    let submit_status = submit_response.status();
+    assert_eq!(submit_status, reqwest::StatusCode::ACCEPTED);
+
+    let response_bytes = submit_response.bytes().await.unwrap();
+    let response = serde_json::from_slice::<SubmitResponse>(&response_bytes).unwrap();
+    info!("Got submission id: {}", response.ulid);
+
+    let submission_id = response.ulid;
+    let timeout = Duration::from_secs_f32(WAIT_TIMEOUT);
+    tokio::time::timeout(timeout, wait_submission(&client, port, submission_id))
+        .await
+        .unwrap();
 }
 
 async fn wait_submission(client: &Client, port: u16, submission_id: Ulid) -> Response {
