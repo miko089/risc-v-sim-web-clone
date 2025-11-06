@@ -105,3 +105,12 @@ pub fn server_url(port: u16) -> Url {
     let addr = SocketAddrV4::new(Ipv4Addr::LOCALHOST, port);
     Url::parse(&format!("http://{addr}")).unwrap()
 }
+
+#[allow(dead_code)]
+pub async fn parse_response_json<T>(response: Response) -> T
+where
+    T: for<'a> serde::Deserialize<'a>,
+{
+    let response_bytes = response.bytes().await.unwrap();
+    serde_json::from_slice::<T>(&response_bytes).unwrap()
+}

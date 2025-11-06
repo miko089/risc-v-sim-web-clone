@@ -1,7 +1,7 @@
 mod common;
 use common::*;
 
-use tokio::task::JoinSet;
+use tokio::{fs, task::JoinSet, time::Instant};
 use ulid::Ulid;
 
 use reqwest::{Client, Response};
@@ -14,6 +14,15 @@ const CONCURRENCY: usize = 5;
 #[derive(serde::Deserialize)]
 struct SubmitResponse {
     pub ulid: Ulid,
+}
+
+#[derive(serde::Deserialize)]
+struct SubmissionResponse {
+    pub ulid: Ulid,
+    pub ticks: u32,
+    pub code: String,
+    #[allow(dead_code)]
+    pub steps: serde_json::Value,
 }
 
 #[tokio::test]
@@ -84,19 +93,30 @@ async fn submit_concurrent() {
 
 async fn make_submission_and_wait_for_success(port: u16, ticks: u32, path: impl AsRef<Path>) {
     let client = reqwest::Client::new();
-    let submit_response = submit_program(&client, port, ticks, path).await;
+    let original_code =
+        String::from_utf8_lossy(&fs::read(path.as_ref()).await.unwrap()).to_string();
+    let start = Instant::now();
+
+    let submit_response = submit_program(&client, port, ticks, path.as_ref()).await;
     let submit_status = submit_response.status();
     assert_eq!(submit_status, reqwest::StatusCode::ACCEPTED);
+    let submit_response = parse_response_json::<SubmitResponse>(submit_response).await;
+    info!("Got submission id: {}", submit_response.ulid);
 
-    let response_bytes = submit_response.bytes().await.unwrap();
-    let response = serde_json::from_slice::<SubmitResponse>(&response_bytes).unwrap();
-    info!("Got submission id: {}", response.ulid);
-
-    let submission_id = response.ulid;
     let timeout = Duration::from_secs_f32(WAIT_TIMEOUT);
-    tokio::time::timeout(timeout, wait_submission(&client, port, submission_id))
-        .await
-        .unwrap();
+    let submission_response = tokio::time::timeout(
+        timeout,
+        wait_submission(&client, port, submit_response.ulid),
+    )
+    .await
+    .unwrap();
+    let dur = Instant::now().duration_since(start);
+    info!("Waited for {:.2} seconds", dur.as_secs_f32());
+
+    let submission_response = parse_response_json::<SubmissionResponse>(submission_response).await;
+    assert_eq!(submission_response.ulid, submit_response.ulid);
+    assert_eq!(submission_response.ticks, ticks);
+    assert_eq!(submission_response.code, original_code);
 }
 
 async fn wait_submission(client: &Client, port: u16, submission_id: Ulid) -> Response {
