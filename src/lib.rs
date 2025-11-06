@@ -1,30 +1,26 @@
 use anyhow::{Context, Result, bail};
 use axum::{
     Router,
+    body::Body,
     extract::{Multipart, Query, State, multipart::Field},
-    http::StatusCode,
+    http::{Request, StatusCode},
     response::Json,
     routing::{get, post},
 };
 use serde::Deserialize;
 use serde_json::json;
-use std::path::{Path, PathBuf};
 use std::time::Duration;
-use tokio::fs;
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tokio::process::Command;
 use tokio::time::timeout;
+use tokio::{fs, net::TcpListener};
 use tower::ServiceBuilder;
-use tower_http::services::ServeDir;
-use tracing::{error, info};
+use tower_http::{services::ServeDir, trace::TraceLayer};
+use tracing::{Instrument, error, info, info_span};
 use ulid::Ulid;
-
-#[derive(Clone)]
-struct AppState {
-    as_binary: String,
-    ld_binary: String,
-    simulator_binary: String,
-    submissions_folder: String,
-}
 
 #[derive(Deserialize)]
 pub struct Submission {
@@ -149,10 +145,10 @@ async fn ticks_from_field(field: Field<'_>) -> Result<u32> {
 
 async fn simulate(
     file_content: bytes::Bytes,
-    path: PathBuf,
-    as_binary: String,
-    ld_binary: String,
-    simulator_binary: String,
+    path: impl AsRef<Path>,
+    as_binary: impl AsRef<Path>,
+    ld_binary: impl AsRef<Path>,
+    simulator_binary: impl AsRef<Path>,
     ticks: u32,
     ulid: Ulid,
 ) -> Json<serde_json::Value> {
@@ -227,23 +223,17 @@ async fn simulate(
 }
 
 async fn submit_handler(
-    State(state): State<AppState>,
+    State(config): State<Arc<Config>>,
     multipart: Multipart,
 ) -> (StatusCode, Json<serde_json::Value>) {
     let ulid;
     let path;
 
-    let AppState {
-        as_binary,
-        ld_binary,
-        simulator_binary,
-        submissions_folder,
-    } = state;
-
     loop {
         let definetly_new_ulid = Ulid::new();
-        let definetly_new_path =
-            Path::new(&submissions_folder).join(definetly_new_ulid.to_string());
+        let definetly_new_path = config
+            .submissions_folder
+            .join(definetly_new_ulid.to_string());
         let exists = fs::try_exists(&definetly_new_path).await;
         if let Err(e) = exists {
             error!("can't access {:#?}: {e}", &definetly_new_path);
@@ -285,22 +275,24 @@ async fn submit_handler(
         file_content.len()
     );
 
-    tokio::spawn(async move {
-        let path2 = path.clone();
-        let Json(json): Json<serde_json::Value> = simulate(
-            file_content,
-            path,
-            as_binary,
-            ld_binary,
-            simulator_binary,
-            ticks,
-            ulid,
-        )
-        .await;
-        if let Err(e) = fs::write(path2.join("simulation.json"), json.to_string()).await {
-            error!("couldn't write simulation.json at {:#?}: {e}", &path2);
-        };
-    });
+    tokio::spawn(
+        async move {
+            let Json(json): Json<serde_json::Value> = simulate(
+                file_content,
+                &path,
+                &config.as_binary,
+                &config.ld_binary,
+                &config.simulator_binary,
+                ticks,
+                ulid,
+            )
+            .await;
+            if let Err(e) = fs::write(path.join("simulation.json"), json.to_string()).await {
+                error!("couldn't write simulation.json at {path:?}: {e}");
+            };
+        }
+        .instrument(info_span!(parent: tracing::Span::current(), "submit_task", ulid = %ulid)),
+    );
 
     (
         StatusCode::ACCEPTED,
@@ -311,16 +303,9 @@ async fn submit_handler(
 }
 
 async fn submission_handler(
-    State(state): State<AppState>,
+    State(config): State<Arc<Config>>,
     submission: Query<Submission>,
 ) -> (axum::http::StatusCode, Json<serde_json::Value>) {
-    let AppState {
-        as_binary: _,
-        ld_binary: _,
-        simulator_binary: _,
-        submissions_folder,
-    } = state;
-
     let ulid = submission.0.ulid;
     let ulid = Ulid::from_string(&ulid);
 
@@ -334,7 +319,8 @@ async fn submission_handler(
         );
     }
     let ulid = ulid.unwrap();
-    let path = PathBuf::from(submissions_folder)
+    let path = config
+        .submissions_folder
         .join(ulid.to_string())
         .join("simulation.json");
     let exists = fs::try_exists(&path).await;
@@ -369,22 +355,26 @@ async fn submission_handler(
     (StatusCode::OK, json_content.unwrap())
 }
 
-pub fn create_app() -> Router {
-    let as_binary = std::env::var("AS_BINARY").unwrap_or_else(|_| "riscv64-elf-as".to_string());
-    let ld_binary = std::env::var("LD_BINARY").unwrap_or_else(|_| "riscv64-elf-ld".to_string());
-    let simulator_binary =
-        std::env::var("SIMULATOR_BINARY").unwrap_or_else(|_| "simulator".to_string());
-    let submissions_folder =
-        std::env::var("SUBMISSIONS_FOLDER").unwrap_or_else(|_| "submission".to_string());
+pub struct Config {
+    pub as_binary: PathBuf,
+    pub ld_binary: PathBuf,
+    pub simulator_binary: PathBuf,
+    pub submissions_folder: PathBuf,
+}
 
-    let state = AppState {
-        as_binary,
-        ld_binary,
-        simulator_binary,
-        submissions_folder,
+pub async fn run(root_span: tracing::Span, listener: TcpListener, cfg: Config) {
+    let def_span = move |request: &Request<Body>| {
+        tracing::debug_span!(
+            parent: &root_span,
+            "request",
+            method = %request.method(),
+            uri = %request.uri(),
+            version = ?request.version(),
+        )
     };
 
-    Router::new()
+    let state = Arc::new(cfg);
+    let router = Router::new()
         .nest(
             "/api",
             Router::new()
@@ -394,7 +384,10 @@ pub fn create_app() -> Router {
         )
         .fallback_service(ServeDir::new("static"))
         .layer(ServiceBuilder::new().layer(tower_http::cors::CorsLayer::permissive()))
-        .with_state(state)
+        .layer(TraceLayer::new_for_http().make_span_with(def_span))
+        .with_state(state);
+
+    axum::serve(listener, router).await.unwrap();
 }
 
 #[cfg(test)]
