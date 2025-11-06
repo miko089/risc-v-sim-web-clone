@@ -229,16 +229,6 @@ async fn submit_handler(
     State(config): State<Arc<Config>>,
     multipart: Multipart,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let ulid = Ulid::new();
-    let submission_dir = submission_dir(&config, ulid);
-    if let Err(e) = fs::create_dir_all(&submission_dir).await {
-        error!("can't create {:#?}: {e}", submission_dir);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json::from(serde_json::Value::Null),
-        );
-    }
-
     let (ticks, file_content) = match parse_submit_inputs(multipart).await.context("parse input") {
         Ok(x) => x,
         Err(e) => {
@@ -255,6 +245,16 @@ async fn submit_handler(
         "Received {} bytes of program code to run for {ticks} ticks",
         file_content.len()
     );
+
+    let ulid = Ulid::new();
+    let submission_dir = submission_dir(&config, ulid);
+    if let Err(e) = fs::create_dir_all(&submission_dir).await {
+        error!("can't create {:#?}: {e}", submission_dir);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json::from(serde_json::Value::Null),
+        );
+    }
 
     tokio::spawn(
         async move {
