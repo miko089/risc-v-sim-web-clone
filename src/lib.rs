@@ -20,11 +20,11 @@ use tokio::{fs, net::TcpListener};
 use tower::ServiceBuilder;
 use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing::{Instrument, error, info, info_span};
-use ulid::Ulid;
+use ulid::{ULID_LEN, Ulid};
 
 #[derive(Deserialize)]
 pub struct Submission {
-    ulid: String,
+    ulid: Ulid,
 }
 
 pub async fn health_handler() -> &'static str {
@@ -306,23 +306,10 @@ async fn submission_handler(
     State(config): State<Arc<Config>>,
     submission: Query<Submission>,
 ) -> (axum::http::StatusCode, Json<serde_json::Value>) {
-    let ulid = submission.0.ulid;
-    let ulid = Ulid::from_string(&ulid);
-
-    if let Err(e) = ulid {
-        error!("{e}");
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": "Not a valid ulid"
-            })),
-        );
-    }
-    let ulid = ulid.unwrap();
-    let path = config
-        .submissions_folder
-        .join(ulid.to_string())
-        .join("simulation.json");
+    let mut buf = [0u8; ULID_LEN];
+    let ulid_str = submission.ulid.array_to_str(&mut buf);
+    let mut path = config.submissions_folder.clone();
+    path.extend([&ulid_str, "simulation.json"]);
     let content = match fs::read(path).await {
         Ok(x) => x,
         Err(e) => {
