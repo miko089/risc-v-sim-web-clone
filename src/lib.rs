@@ -9,7 +9,7 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::json;
-use std::time::Duration;
+use std::{io::ErrorKind, time::Duration};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -323,27 +323,19 @@ async fn submission_handler(
         .submissions_folder
         .join(ulid.to_string())
         .join("simulation.json");
-    let exists = fs::try_exists(&path).await;
-    if let Err(e) = exists {
-        error!("can't access {:#?}: {e}", &path);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json::from(serde_json::Value::Null),
-        );
-    }
-    let exists = exists.unwrap();
-    if !exists {
-        return (StatusCode::NOT_FOUND, Json(serde_json::Value::Null));
-    }
-    let content = fs::read(path).await;
-    if let Err(e) = content {
-        error!("{e}");
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::Value::Null),
-        );
-    }
-    let content = content.unwrap();
+    let content = match fs::read(path).await {
+        Ok(x) => x,
+        Err(e) => {
+            if e.kind() == ErrorKind::NotFound {
+                return (StatusCode::NOT_FOUND, Json(serde_json::Value::Null));
+            } else {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::Value::Null),
+                );
+            }
+        }
+    };
     let json_content = Json::from_bytes(&content);
     if let Err(e) = json_content {
         error!("{e}");
