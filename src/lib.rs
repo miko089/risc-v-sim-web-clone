@@ -227,10 +227,7 @@ async fn submit_handler(
     multipart: Multipart,
 ) -> (StatusCode, Json<serde_json::Value>) {
     let ulid = Ulid::new();
-    let mut buf = [0u8; ULID_LEN];
-    let ulid_str = ulid.array_to_str(&mut buf);
-    let submission_dir = config.submissions_folder.join(&ulid_str);
-
+    let submission_dir = submission_dir(&config, ulid);
     if let Err(e) = fs::create_dir_all(&submission_dir).await {
         error!("can't create {:#?}: {e}", submission_dir);
         return (
@@ -268,7 +265,9 @@ async fn submit_handler(
                 ulid,
             )
             .await;
-            if let Err(e) = fs::write(submission_dir.join("simulation.json"), json.to_string()).await {
+            if let Err(e) =
+                fs::write(submission_dir.join("simulation.json"), json.to_string()).await
+            {
                 error!("couldn't write simulation.json at {submission_dir:?}: {e}");
             };
         }
@@ -287,11 +286,8 @@ async fn submission_handler(
     State(config): State<Arc<Config>>,
     submission: Query<Submission>,
 ) -> (axum::http::StatusCode, Json<serde_json::Value>) {
-    let mut buf = [0u8; ULID_LEN];
-    let ulid_str = submission.ulid.array_to_str(&mut buf);
-    let mut path = config.submissions_folder.clone();
-    path.extend([&ulid_str, "simulation.json"]);
-    let content = match fs::read(path).await {
+    let submission = submission_file(&config, submission.ulid);
+    let content = match fs::read(submission).await {
         Ok(x) => x,
         Err(e) => {
             if e.kind() == ErrorKind::NotFound {
@@ -350,6 +346,21 @@ pub async fn run(root_span: tracing::Span, listener: TcpListener, cfg: Config) {
     axum::serve(listener, router).await.unwrap();
 }
 
+fn submission_dir(config: &Config, ulid: Ulid) -> PathBuf {
+    let mut buf = [0u8; ULID_LEN];
+    let ulid_str = ulid.array_to_str(&mut buf);
+    config.submissions_folder.join(&ulid_str)
+}
+
+fn submission_file(config: &Config, ulid: Ulid) -> PathBuf {
+    let mut buf = [0u8; ULID_LEN];
+    let ulid_str = ulid.array_to_str(&mut buf);
+    let mut path = config.submissions_folder.clone();
+    path.extend([&ulid_str, "simulation.json"]);
+
+    path
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,5 +369,21 @@ mod tests {
     async fn test_health_handler() {
         let response = health_handler().await;
         assert_eq!(response, "Ok");
+    }
+
+    #[test]
+    fn test_path_utils() {
+        let config = Config {
+            as_binary: "dummy".into(),
+            ld_binary: "dummy".into(),
+            simulator_binary: "dummy".into(),
+            submissions_folder: "submissions".into(),
+        };
+        for _ in 0..10 {
+            let ulid = Ulid::new();
+            let dir = submission_dir(&config, ulid);
+            let file = submission_file(&config, ulid);
+            assert!(file.starts_with(dir));
+        }
     }
 }
