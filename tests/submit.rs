@@ -32,7 +32,8 @@ async fn submit_simple() {
         |_| {},
         async |port| {
             let client = reqwest::Client::new();
-            let submit_response = submit_program(&client, port, 5, "samples/basic.s").await;
+            let submit_response =
+                submit_program(&client, port, 5, "riscv-samples/src/basic.s").await;
             let submit_status = submit_response.status();
             let resp_text = match submit_response.text().await {
                 Ok(x) => format!("Response as text: {x}"),
@@ -50,7 +51,7 @@ async fn submit_and_wait() {
         "submit_and_wait",
         |_| {},
         async |port| {
-            make_submission_and_wait_for_success(port, 5, "samples/basic.s").await;
+            make_submission_and_wait_for_success(port, 5, "riscv-samples/src/basic.s").await;
         },
     )
     .await;
@@ -80,7 +81,7 @@ async fn submit_concurrent() {
             let set = (0..CONCURRENCY)
                 .map(|id| {
                     tokio::spawn(
-                        make_submission_and_wait_for_success(port, 5, "samples/basic.s")
+                        make_submission_and_wait_for_success(port, 5, "riscv-samples/src/basic.s")
                             .instrument(info_span!("concurrent_client", id = id)),
                     )
                 })
