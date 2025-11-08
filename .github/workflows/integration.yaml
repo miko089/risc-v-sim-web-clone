@@ -33,10 +33,38 @@ jobs:
         with:
           name: simulator
           path: ./risc-v-sim/target/debug/risc-v-sim
+  capture-traces:
+    runs-on: ubuntu-24.04
+    needs: build-risc-v-sim
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        id: cache-artifacts
+        continue-on-error: false
+        with:
+          path: |
+            riscv-samples/bin
+            riscv-samples/traces
+          key: ci-integration-samples-${{ hashFiles('riscv-samples/src/*', 'riscv-samples/cfg/*') }}
+          restore-keys: ci-integration-cargo-
+      - name: Download simulator
+        uses: actions/download-artifact@v4
+        with:
+          name: simulator
+          path: ./riscv-samples
+      - run: chmod +x ./riscv-samples/risc-v-sim
+      - name: build and capture
+        if: steps.cache-artifacts.outputs.cache-hit != 'true'
+        run: docker run --rm --mount type=bind,src=./riscv-samples,dst=/ws krinkin/rv64-toolchain:latest make capture
+      - name: Upload traces
+        uses: actions/upload-artifact@v4
+        with:
+          name: traces
+          path: ./riscv-samples/traces/*.json
   run-tests:
     runs-on: ubuntu-24.04
     container: krinkin/rv64-toolchain
-    needs: build-risc-v-sim
+    needs: [build-risc-v-sim, capture-traces]
     steps:    
       # Required by the openssl crate
       # https://docs.rs/openssl/latest/openssl/#automatic
@@ -71,6 +99,11 @@ jobs:
         with:
           name: simulator
           path: tools
+      - name: Download traces
+        uses: actions/download-artifact@v4
+        with:
+          name: traces
+          path: traces
       - run: |
           export PATH=~/.cargo/bin:$PATH
           export SIMULATOR_BINARY=./tools/risc-v-sim

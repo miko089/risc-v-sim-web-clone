@@ -5,7 +5,10 @@ use tokio::{fs, task::JoinSet, time::Instant};
 use ulid::Ulid;
 
 use reqwest::{Client, Response};
-use std::{path::Path, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 use tracing::{Instrument, info, info_span};
 
 const WAIT_TIMEOUT: f32 = 5.0;
@@ -21,7 +24,6 @@ struct SubmissionResponse {
     pub ulid: Ulid,
     pub ticks: u32,
     pub code: String,
-    #[allow(dead_code)]
     pub steps: serde_json::Value,
 }
 
@@ -32,7 +34,8 @@ async fn submit_simple() {
         |_| {},
         async |port| {
             let client = reqwest::Client::new();
-            let submit_response = submit_program(&client, port, 5, "samples/basic.s").await;
+            let submit_response =
+                submit_program(&client, port, 5, "riscv-samples/src/basic.s").await;
             let submit_status = submit_response.status();
             let resp_text = match submit_response.text().await {
                 Ok(x) => format!("Response as text: {x}"),
@@ -50,7 +53,7 @@ async fn submit_and_wait() {
         "submit_and_wait",
         |_| {},
         async |port| {
-            make_submission_and_wait_for_success(port, 5, "samples/basic.s").await;
+            make_submission_and_wait_for_success(port, "basic.s").await;
         },
     )
     .await;
@@ -80,7 +83,7 @@ async fn submit_concurrent() {
             let set = (0..CONCURRENCY)
                 .map(|id| {
                     tokio::spawn(
-                        make_submission_and_wait_for_success(port, 5, "samples/basic.s")
+                        make_submission_and_wait_for_success(port, "basic.s")
                             .instrument(info_span!("concurrent_client", id = id)),
                     )
                 })
@@ -91,13 +94,21 @@ async fn submit_concurrent() {
     .await;
 }
 
-async fn make_submission_and_wait_for_success(port: u16, ticks: u32, path: impl AsRef<Path>) {
+async fn make_submission_and_wait_for_success(port: u16, source_file: impl AsRef<Path>) {
     let client = reqwest::Client::new();
-    let original_code =
-        String::from_utf8_lossy(&fs::read(path.as_ref()).await.unwrap()).to_string();
+
+    let mut source_path = PathBuf::from_iter(["riscv-samples", "src"]);
+    source_path.push(source_file.as_ref());
+    let original_code = String::from_utf8_lossy(&fs::read(&source_path).await.unwrap()).to_string();
+
+    let mut ticks_path = PathBuf::from_iter(["riscv-samples", "cfg"]);
+    ticks_path.push(source_file.as_ref().file_stem().unwrap());
+    let ticks = String::from_utf8_lossy(&fs::read(ticks_path).await.unwrap()).to_string();
+    let ticks = ticks.trim().parse().unwrap();
+
     let start = Instant::now();
 
-    let submit_response = submit_program(&client, port, ticks, path.as_ref()).await;
+    let submit_response = submit_program(&client, port, ticks, &source_path).await;
     let submit_status = submit_response.status();
     assert_eq!(submit_status, reqwest::StatusCode::ACCEPTED);
     let submit_response = parse_response_json::<SubmitResponse>(submit_response).await;
@@ -117,6 +128,22 @@ async fn make_submission_and_wait_for_success(port: u16, ticks: u32, path: impl 
     assert_eq!(submission_response.ulid, submit_response.ulid);
     assert_eq!(submission_response.ticks, ticks);
     assert_eq!(submission_response.code, original_code);
+    verify_submission_trace(submission_response, &source_path).await;
+}
+
+async fn verify_submission_trace(submission_response: SubmissionResponse, source_path: &Path) {
+    info!("Checking trace VS actual run of risc-v-sim");
+    let mut filename = PathBuf::from(source_path.file_name().unwrap());
+    filename.set_extension("json");
+    let mut path = PathBuf::from("traces");
+    path.push(filename);
+
+    let data = fs::read(path).await.unwrap();
+    let actual_trace: serde_json::Value = serde_json::from_slice(&data).unwrap();
+    let actual_trace = actual_trace.as_object().unwrap();
+    let actual_steps = &actual_trace["steps"];
+    assert_eq!(actual_steps, &submission_response.steps);
+    info!("Traces match");
 }
 
 async fn wait_submission(client: &Client, port: u16, submission_id: Ulid) -> Response {
