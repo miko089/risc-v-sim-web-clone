@@ -5,7 +5,10 @@ use tokio::{fs, task::JoinSet, time::Instant};
 use ulid::Ulid;
 
 use reqwest::{Client, Response};
-use std::{path::Path, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 use tracing::{Instrument, info, info_span};
 
 const WAIT_TIMEOUT: f32 = 5.0;
@@ -21,7 +24,6 @@ struct SubmissionResponse {
     pub ulid: Ulid,
     pub ticks: u32,
     pub code: String,
-    #[allow(dead_code)]
     pub steps: serde_json::Value,
 }
 
@@ -118,6 +120,22 @@ async fn make_submission_and_wait_for_success(port: u16, ticks: u32, path: impl 
     assert_eq!(submission_response.ulid, submit_response.ulid);
     assert_eq!(submission_response.ticks, ticks);
     assert_eq!(submission_response.code, original_code);
+    verify_submission_trace(submission_response, path.as_ref()).await;
+}
+
+async fn verify_submission_trace(submission_response: SubmissionResponse, source_path: &Path) {
+    info!("Checking trace VS actual run of risc-v-sim");
+    let mut filename = PathBuf::from(source_path.file_name().unwrap());
+    filename.set_extension("json");
+    let mut path = PathBuf::from("traces");
+    path.push(filename);
+
+    let data = fs::read(path).await.unwrap();
+    let actual_trace: serde_json::Value = serde_json::from_slice(&data).unwrap();
+    let actual_trace = actual_trace.as_object().unwrap();
+    let actual_steps = &actual_trace["steps"];
+    assert_eq!(actual_steps, &submission_response.steps);
+    info!("Traces match");
 }
 
 async fn wait_submission(client: &Client, port: u16, submission_id: Ulid) -> Response {

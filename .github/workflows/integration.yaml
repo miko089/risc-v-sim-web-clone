@@ -64,7 +64,7 @@ jobs:
   run-tests:
     runs-on: ubuntu-24.04
     container: krinkin/rv64-toolchain
-    needs: build-risc-v-sim
+    needs: [build-risc-v-sim, capture-traces]
     steps:    
       # Required by the openssl crate
       # https://docs.rs/openssl/latest/openssl/#automatic
@@ -99,6 +99,11 @@ jobs:
         with:
           name: simulator
           path: tools
+      - name: Download traces
+        uses: actions/download-artifact@v4
+        with:
+          name: traces
+          path: traces
       - run: |
           export PATH=~/.cargo/bin:$PATH
           export SIMULATOR_BINARY=./tools/risc-v-sim
