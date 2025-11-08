@@ -53,7 +53,7 @@ async fn submit_and_wait() {
         "submit_and_wait",
         |_| {},
         async |port| {
-            make_submission_and_wait_for_success(port, 5, "riscv-samples/src/basic.s").await;
+            make_submission_and_wait_for_success(port, "riscv-samples/src/basic.s").await;
         },
     )
     .await;
@@ -83,7 +83,7 @@ async fn submit_concurrent() {
             let set = (0..CONCURRENCY)
                 .map(|id| {
                     tokio::spawn(
-                        make_submission_and_wait_for_success(port, 5, "riscv-samples/src/basic.s")
+                        make_submission_and_wait_for_success(port, "riscv-samples/src/basic.s")
                             .instrument(info_span!("concurrent_client", id = id)),
                     )
                 })
@@ -94,13 +94,19 @@ async fn submit_concurrent() {
     .await;
 }
 
-async fn make_submission_and_wait_for_success(port: u16, ticks: u32, path: impl AsRef<Path>) {
+async fn make_submission_and_wait_for_success(port: u16, source_path: impl AsRef<Path>) {
     let client = reqwest::Client::new();
     let original_code =
-        String::from_utf8_lossy(&fs::read(path.as_ref()).await.unwrap()).to_string();
+        String::from_utf8_lossy(&fs::read(source_path.as_ref()).await.unwrap()).to_string();
+
+    let mut ticks_path = PathBuf::from_iter(["riscv-samples", "cfg"]);
+    ticks_path.push(source_path.as_ref().file_stem().unwrap());
+    let ticks = String::from_utf8_lossy(&fs::read(ticks_path).await.unwrap()).to_string();
+    let ticks = ticks.trim().parse().unwrap();
+
     let start = Instant::now();
 
-    let submit_response = submit_program(&client, port, ticks, path.as_ref()).await;
+    let submit_response = submit_program(&client, port, ticks, source_path.as_ref()).await;
     let submit_status = submit_response.status();
     assert_eq!(submit_status, reqwest::StatusCode::ACCEPTED);
     let submit_response = parse_response_json::<SubmitResponse>(submit_response).await;
@@ -120,7 +126,7 @@ async fn make_submission_and_wait_for_success(port: u16, ticks: u32, path: impl 
     assert_eq!(submission_response.ulid, submit_response.ulid);
     assert_eq!(submission_response.ticks, ticks);
     assert_eq!(submission_response.code, original_code);
-    verify_submission_trace(submission_response, path.as_ref()).await;
+    verify_submission_trace(submission_response, source_path.as_ref()).await;
 }
 
 async fn verify_submission_trace(submission_response: SubmissionResponse, source_path: &Path) {
