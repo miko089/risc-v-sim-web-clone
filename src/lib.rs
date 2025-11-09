@@ -109,7 +109,10 @@ pub async fn run_simulator(config: &Config, submission_dir: &Path, ticks: u32) -
     Ok(stdout)
 }
 
-pub async fn parse_submit_inputs(mut multipart: Multipart) -> Result<(u32, bytes::Bytes)> {
+pub async fn parse_submit_inputs(
+    mut multipart: Multipart,
+    config: &Config,
+) -> Result<(u32, bytes::Bytes)> {
     let mut ticks: Option<u32> = None;
     let mut file: Option<bytes::Bytes> = None;
 
@@ -130,6 +133,12 @@ pub async fn parse_submit_inputs(mut multipart: Multipart) -> Result<(u32, bytes
     let Some(file) = file else {
         bail!("file field not set")
     };
+    if ticks >= config.ticks_max {
+        bail!("ticks number exceeds {}", config.ticks_max)
+    }
+    if file.len() >= config.codesize_max as usize {
+        bail!("file length exceeds {}", config.codesize_max)
+    }
     Ok((ticks, file))
 }
 
@@ -185,7 +194,10 @@ async fn submit_handler(
     State(config): State<Arc<Config>>,
     multipart: Multipart,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let (ticks, source_code) = match parse_submit_inputs(multipart).await.context("parse input") {
+    let (ticks, source_code) = match parse_submit_inputs(multipart, config.as_ref())
+        .await
+        .context("parse input")
+    {
         Ok(x) => x,
         Err(e) => {
             info!("Bad request: {e:#}");
@@ -272,6 +284,8 @@ pub struct Config {
     pub ld_binary: PathBuf,
     pub simulator_binary: PathBuf,
     pub submissions_folder: PathBuf,
+    pub ticks_max: u32,
+    pub codesize_max: u32,
 }
 
 pub async fn run(root_span: tracing::Span, listener: TcpListener, cfg: Config) {
@@ -319,6 +333,8 @@ fn submission_file(config: &Config, ulid: Ulid) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    use std::u32;
+
     use super::*;
 
     #[tokio::test]
@@ -334,6 +350,8 @@ mod tests {
             ld_binary: "dummy".into(),
             simulator_binary: "dummy".into(),
             submissions_folder: "submissions".into(),
+            ticks_max: u32::MAX,
+            codesize_max: u32::MAX,
         };
         for _ in 0..10 {
             let ulid = Ulid::new();
