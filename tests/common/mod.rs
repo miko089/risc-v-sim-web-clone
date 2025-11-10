@@ -65,6 +65,20 @@ pub fn default_config(test_name: &str) -> risc_v_sim_web::Config {
             .unwrap_or_else(|_| "simulator".to_string())
             .into(),
         submissions_folder: format!("submissions-{test_name}").into(),
+        ticks_max: std::env::var("TICKS_MAX")
+            .unwrap_or_else(|_| "150".to_string())
+            .parse()
+            .unwrap_or_else(|x| {
+                info!("can't parse {x} as a number, using 150");
+                150
+            }),
+        codesize_max: std::env::var("CODESIZE_MAX")
+            .unwrap_or_else(|_| "250".to_string())
+            .parse()
+            .unwrap_or_else(|x| {
+                info!("can't parse {x} as a number, using 250");
+                250
+            }),
     }
 }
 
