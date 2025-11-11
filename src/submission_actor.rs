@@ -38,29 +38,6 @@ pub async fn run_submission_actor(config: Arc<Config>, mut tasks: Receiver<Submi
     }
 }
 
-async fn write_error_to(err: &str, file: &fs::File) -> Result<()> {
-    let file_clone = file.try_clone().await;
-    if let Err(e) = file_clone {
-        bail!("can't clone {:#?} due to {e}", file);
-    }
-    let mut file_clone = file_clone.unwrap();
-    let res = file_clone
-        .write_all(
-            json!(
-                {
-                    "error": err
-                }
-            )
-            .to_string()
-            .as_bytes(),
-        )
-        .await;
-    if let Err(e) = res {
-        bail!("can't write to {:#?} due to {e}", file)
-    }
-    Ok(())
-}
-
 async fn future_with_timeout<T>(
     duration: Duration,
     f: impl Future<Output = Result<T>>,
