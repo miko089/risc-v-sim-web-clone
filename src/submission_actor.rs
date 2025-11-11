@@ -110,10 +110,10 @@ async fn submission_task(config: Arc<Config>, task: SubmissionTask) {
         error!("can't create submissiond_dir due to {e}");
         return;
     }
-    
+
     let sim_res = simulate(&config, task.ulid, task.source_code, task.ticks).await;
     let file_path = submission_file(config.as_ref(), task.ulid.clone());
-    
+
     match sim_res {
         Err(e) => {
             let error_json = json!({ "error": e.to_string() });
