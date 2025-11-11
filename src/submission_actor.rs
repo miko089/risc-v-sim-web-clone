@@ -1,9 +1,17 @@
-use std::path::PathBuf;
-use std::sync::Arc;
-
+use anyhow::{Context, Result, bail};
 use bytes::Bytes;
+use serde_json::json;
+use std::path::Path;
+use std::path::PathBuf;
+use tokio::fs;
+
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::io::AsyncWriteExt;
+use tokio::process::Command;
 use tokio::sync::mpsc::Receiver;
-use tracing::{Instrument, debug, info, info_span};
+use tokio::time::timeout;
+use tracing::{Instrument, debug, error, info, info_span};
 use ulid::{ULID_LEN, Ulid};
 
 pub struct SubmissionTask {
@@ -30,8 +38,95 @@ pub async fn run_submission_actor(config: Arc<Config>, mut tasks: Receiver<Submi
     }
 }
 
+async fn write_error_to(err: &str, file: &fs::File) -> Result<()> {
+    let file_clone = file.try_clone().await;
+    if let Err(e) = file_clone {
+        bail!("can't clone {:#?} due to {e}", file);
+    }
+    let mut file_clone = file_clone.unwrap();
+    let res = file_clone
+        .write_all(
+            json!(
+                {
+                    "error": err
+                }
+            )
+            .to_string()
+            .as_bytes(),
+        )
+        .await;
+    if let Err(e) = res {
+        bail!("can't write to {:#?} due to {e}", file)
+    }
+    Ok(())
+}
+
+async fn future_with_timeout<T>(
+    duration: Duration,
+    f: impl Future<Output = Result<T>>,
+) -> Result<T> {
+    timeout(duration, f)
+        .await
+        .map_err(anyhow::Error::from)
+        .flatten()
+}
+
+async fn simulate(
+    config: &Config,
+    ulid: Ulid,
+    source_code: bytes::Bytes,
+    ticks: u32,
+) -> Result<serde_json::Value> {
+    let submission_dir = submission_dir(config, ulid);
+    future_with_timeout(
+        Duration::from_secs(5),
+        compile_s_to_elf(config, &source_code, &submission_dir),
+    )
+    .await
+    .context("compilation")?;
+
+    let stdout = future_with_timeout(
+        Duration::from_secs(10),
+        run_simulator(config, &submission_dir, ticks),
+    )
+    .await
+    .context("simulation")?;
+
+    let mut json = serde_json::from_str(&stdout).context("parse simulation output")?;
+    if let serde_json::Value::Object(map) = &mut json {
+        map.insert("ulid".to_string(), json!(ulid));
+        map.insert("ticks".to_string(), json!(ticks));
+        map.insert(
+            "code".to_string(),
+            json!(String::from_utf8_lossy(&source_code)),
+        );
+    }
+    Ok(json)
+}
+
 async fn submission_task(config: Arc<Config>, task: SubmissionTask) {
-    info!("Tasks are not implemented");
+    let sub_dir = submission_dir(&config, task.ulid);
+    if let Err(e) = fs::create_dir_all(sub_dir).await {
+        error!("can't create submissiond_dir due to {e}");
+        return;
+    }
+    
+    let sim_res = simulate(&config, task.ulid, task.source_code, task.ticks).await;
+    let file_path = submission_file(config.as_ref(), task.ulid.clone());
+    
+    match sim_res {
+        Err(e) => {
+            let error_json = json!({ "error": e.to_string() });
+            if let Err(write_err) = fs::write(&file_path, error_json.to_string()).await {
+                error!("can't write error to {:#?} due to {write_err}", file_path);
+            }
+        }
+        Ok(out) => {
+            if let Err(write_err) = fs::write(&file_path, out.to_string()).await {
+                error!("can't write result to {:#?} due to {write_err}", file_path);
+            }
+        }
+    }
 }
 
 pub fn submission_dir(config: &Config, ulid: Ulid) -> PathBuf {
@@ -47,6 +142,82 @@ pub fn submission_file(config: &Config, ulid: Ulid) -> PathBuf {
     path.extend([&ulid_str, "simulation.json"]);
 
     path
+}
+
+pub async fn compile_s_to_elf(
+    config: &Config,
+    s_content: &[u8],
+    submission_dir: impl AsRef<Path>,
+) -> Result<()> {
+    let dir = submission_dir.as_ref();
+    let s_path = dir.join("input.s");
+    let o_path = dir.join("output.o");
+    let elf_path = dir.join("output.elf");
+
+    info!("Writing program to {s_path:?}");
+    let mut file = fs::File::create_new(&s_path)
+        .await
+        .context("writing source code")?;
+    file.write_all(s_content).await?;
+
+    info!("Compiling {s_path:?} to object file {o_path:?}");
+    let as_output = Command::new(&config.as_binary)
+        .arg(&s_path)
+        .arg("-o")
+        .arg(&o_path)
+        .kill_on_drop(true)
+        .output()
+        .await
+        .context("assembling")?;
+    if !as_output.status.success() {
+        let stderr = String::from_utf8_lossy(&as_output.stderr);
+        let stdout = String::from_utf8_lossy(&as_output.stdout);
+        bail!("Assembler error:\n{}\n{}", stderr, stdout);
+    }
+
+    info!("Linking {o_path:?} to elf {elf_path:?}");
+    let ld_output = Command::new(&config.ld_binary)
+        .arg(&o_path)
+        .arg("-Ttext=0x80000000")
+        .arg("-o")
+        .arg(&elf_path)
+        .kill_on_drop(true)
+        .output()
+        .await
+        .context("linking")?;
+    if !ld_output.status.success() {
+        let stderr = String::from_utf8_lossy(&ld_output.stderr);
+        let stdout = String::from_utf8_lossy(&ld_output.stdout);
+        bail!("Linker error:\n{}\n{}", stderr, stdout);
+    }
+
+    info!("Elf ready");
+    Ok(())
+}
+
+pub async fn run_simulator(config: &Config, submission_dir: &Path, ticks: u32) -> Result<String> {
+    let elf_path = submission_dir.join("output.elf");
+    info!("Simulating the program at {elf_path:?}");
+
+    let output = Command::new(&config.simulator_binary)
+        .arg("--ticks")
+        .arg(ticks.to_string())
+        .arg("--path")
+        .arg(&elf_path)
+        .kill_on_drop(true)
+        .output()
+        .await
+        .context("simulating")?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let _stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    if !output.status.success() {
+        bail!("simulator failed");
+    }
+
+    info!("Simulating has been successful");
+    Ok(stdout)
 }
 
 #[cfg(test)]
