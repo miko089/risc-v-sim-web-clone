@@ -66,8 +66,7 @@ async fn simulate(
         Duration::from_secs(10),
         run_simulator(config, &submission_dir, ticks),
     )
-    .await
-    .context("simulation")?;
+    .await?;
 
     let mut json = serde_json::from_str(&stdout).context("parse simulation output")?;
     if let serde_json::Value::Object(map) = &mut json {
@@ -187,10 +186,10 @@ pub async fn run_simulator(config: &Config, submission_dir: &Path, ticks: u32) -
         .context("simulating")?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let _stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
     if !output.status.success() {
-        bail!("simulator failed");
+        bail!("Simulation error: {stderr}");
     }
 
     info!("Simulating has been successful");
