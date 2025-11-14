@@ -41,7 +41,11 @@ async fn submit_simple() {
                 Ok(x) => format!("Response as text: {x}"),
                 Err(e) => format!("Response has no text: {e}"),
             };
-            assert_eq!(submit_status, reqwest::StatusCode::ACCEPTED, "{resp_text}");
+            assert_eq!(
+                submit_status, 
+                reqwest::StatusCode::ACCEPTED, 
+                "{resp_text}"
+            );
         },
     )
     .await;
@@ -107,7 +111,11 @@ async fn codesize_max_restriction() {
                 Ok(x) => format!("Response as text: {x}"),
                 Err(e) => format!("Response has no text: {e}"),
             };
-            assert_eq!(submit_status, reqwest::StatusCode::BAD_REQUEST, "{resp_text}");
+            assert_eq!(
+                submit_status, 
+                reqwest::StatusCode::BAD_REQUEST, 
+                "{resp_text}"
+            );
         },
     )
     .await;
