@@ -107,8 +107,7 @@ async fn codesize_max_restriction() {
                 Ok(x) => format!("Response as text: {x}"),
                 Err(e) => format!("Response has no text: {e}"),
             };
-            assert_ne!(submit_status, reqwest::StatusCode::ACCEPTED, "{resp_text}");
-            assert_ne!(submit_status, reqwest::StatusCode::OK, "{resp_text}");
+            assert_eq!(submit_status, reqwest::StatusCode::BAD_REQUEST, "{resp_text}");
         },
     )
     .await;
@@ -128,8 +127,7 @@ async fn ticks_max_restriction() {
                 Ok(x) => format!("Response as text: {x}"),
                 Err(e) => format!("Response has no text: {e}"),
             };
-            assert_ne!(submit_status, reqwest::StatusCode::ACCEPTED, "{resp_text}");
-            assert_ne!(submit_status, reqwest::StatusCode::OK, "{resp_text}");
+            assert_eq!(submit_status, reqwest::StatusCode::BAD_REQUEST, "{resp_text}");
         },
     )
     .await;
