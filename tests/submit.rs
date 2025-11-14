@@ -121,7 +121,8 @@ async fn ticks_max_restriction() {
         |_| {},
         async |port| {
             let client = reqwest::Client::new();
-            let submit_response = submit_program(&client, port, 100, "riscv-samples/src/basic.s").await;
+            let submit_response =
+                submit_program(&client, port, 100, "riscv-samples/src/basic.s").await;
             let submit_status = submit_response.status();
             let resp_text = match submit_response.text().await {
                 Ok(x) => format!("Response as text: {x}"),
