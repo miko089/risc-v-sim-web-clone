@@ -88,20 +88,11 @@ async fn submission_task(config: Arc<Config>, task: SubmissionTask) {
     }
 
     let sim_res = simulate(&config, task.ulid, task.source_code, task.ticks).await;
-    let file_path = submission_file(config.as_ref(), task.ulid.clone());
+    let file_path = submission_file(config.as_ref(), task.ulid);
 
-    match sim_res {
-        Err(e) => {
-            let error_json = json!({ "error": e.to_string() });
-            if let Err(write_err) = fs::write(&file_path, error_json.to_string()).await {
-                error!("can't write error to {:#?} due to {write_err}", file_path);
-            }
-        }
-        Ok(out) => {
-            if let Err(write_err) = fs::write(&file_path, out.to_string()).await {
-                error!("can't write result to {:#?} due to {write_err}", file_path);
-            }
-        }
+    let to_write = sim_res.unwrap_or_else(|e| json!({"error": format!("{e:?}")}));
+    if let Err(write_err) = fs::write(&file_path, to_write.to_string()).await {
+        error!("failed to write submission task result: {write_err}");
     }
 }
 
@@ -120,7 +111,7 @@ pub fn submission_file(config: &Config, ulid: Ulid) -> PathBuf {
     path
 }
 
-pub async fn compile_s_to_elf(
+async fn compile_s_to_elf(
     config: &Config,
     s_content: &[u8],
     submission_dir: impl AsRef<Path>,
@@ -171,7 +162,7 @@ pub async fn compile_s_to_elf(
     Ok(())
 }
 
-pub async fn run_simulator(config: &Config, submission_dir: &Path, ticks: u32) -> Result<String> {
+async fn run_simulator(config: &Config, submission_dir: &Path, ticks: u32) -> Result<String> {
     let elf_path = submission_dir.join("output.elf");
     info!("Simulating the program at {elf_path:?}");
 
