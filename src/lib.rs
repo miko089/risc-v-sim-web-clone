@@ -191,7 +191,7 @@ pub async fn run(root_span: tracing::Span, listener: TcpListener, cfg: Config) {
 
 #[cfg(test)]
 mod tests {
-  
+
     use super::*;
 
     #[tokio::test]
