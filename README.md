@@ -4,6 +4,8 @@ Web version of [risc-v-sim](https://github.com/nup-csai/risc-v-sim)
 
 ## How to run
 ```bash
+git clone --recursive https://github.com/robocy-lab/risc-v-sim-web
+cd risc-v-sim-web
 docker build -t meow .
 docker run -d --rm -p 3000:3000 -t meow
 ```
