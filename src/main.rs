@@ -1,19 +1,21 @@
+use anyhow::Result;
 use std::net::{Ipv4Addr, SocketAddrV4};
-
 use tracing::{Level, info};
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_level(true)
         .with_max_level(Level::INFO)
         .init();
 
     let address = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 3000);
-    let listener = tokio::net::TcpListener::bind(address).await.unwrap();
-    let port = listener.local_addr().unwrap().port();
+    let listener = tokio::net::TcpListener::bind(address).await?;
+    let port = listener.local_addr()?.port();
     info!("Listening on port {port}");
 
+    let ticks_max: u32 = std::env::var("TICKS_MAX")?.parse()?;
+    let codesize_max: u32 = std::env::var("CODESIZE_MAX")?.parse()?;
     risc_v_sim_web::run(
         tracing::info_span!("rvsim-web"),
         listener,
@@ -30,7 +32,11 @@ async fn main() {
             submissions_folder: std::env::var("SUBMISSIONS_FOLDER")
                 .unwrap_or_else(|_| "submission".to_string())
                 .into(),
+            ticks_max: ticks_max,
+            codesize_max: codesize_max,
         },
     )
     .await;
+
+    Ok(())
 }

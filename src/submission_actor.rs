@@ -25,6 +25,8 @@ pub struct Config {
     pub ld_binary: PathBuf,
     pub simulator_binary: PathBuf,
     pub submissions_folder: PathBuf,
+    pub ticks_max: u32,
+    pub codesize_max: u32,
 }
 
 pub async fn run_submission_actor(config: Arc<Config>, mut tasks: Receiver<SubmissionTask>) {
@@ -90,7 +92,26 @@ async fn submission_task(config: Arc<Config>, task: SubmissionTask) {
     let sim_res = simulate(&config, task.ulid, task.source_code, task.ticks).await;
     let file_path = submission_file(config.as_ref(), task.ulid);
 
-    let to_write = sim_res.unwrap_or_else(|e| json!({"error": format!("{e:?}")}));
+    let to_write = match sim_res {
+        Ok(mut json) => {
+            // Ensure ulid is always present
+            if let serde_json::Value::Object(map) = &mut json {
+                if !map.contains_key("ulid") {
+                    map.insert("ulid".to_string(), json!(task.ulid));
+                }
+            }
+            json
+        }
+        Err(e) => {
+            json!({
+                "error": format!("{e:?}"),
+                "ulid": task.ulid,
+                "ticks": task.ticks,
+                "code": String::from_utf8_lossy(&task.source_code)
+            })
+        }
+    };
+
     if let Err(write_err) = fs::write(&file_path, to_write.to_string()).await {
         error!("failed to write submission task result: {write_err}");
     }
@@ -198,6 +219,8 @@ mod tests {
             ld_binary: "dummy".into(),
             simulator_binary: "dummy".into(),
             submissions_folder: "submissions".into(),
+            ticks_max: u32::MAX,
+            codesize_max: u32::MAX,
         };
         for _ in 0..10 {
             let ulid = Ulid::new();

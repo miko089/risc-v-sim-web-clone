@@ -9,6 +9,7 @@ use axum::{
     response::Json,
     routing::{get, post},
 };
+use bytes;
 use serde::Deserialize;
 use serde_json::json;
 use std::io::ErrorKind;
@@ -35,7 +36,10 @@ pub async fn health_handler() -> &'static str {
     "Ok"
 }
 
-pub async fn parse_submit_inputs(mut multipart: Multipart) -> Result<(u32, bytes::Bytes)> {
+pub async fn parse_submit_inputs(
+    mut multipart: Multipart,
+    config: &Config,
+) -> Result<(u32, bytes::Bytes)> {
     let mut ticks: Option<u32> = None;
     let mut file: Option<bytes::Bytes> = None;
 
@@ -56,6 +60,12 @@ pub async fn parse_submit_inputs(mut multipart: Multipart) -> Result<(u32, bytes
     let Some(file) = file else {
         bail!("file field not set")
     };
+    if ticks >= config.ticks_max {
+        bail!("ticks number exceeds {}", config.ticks_max)
+    }
+    if file.len() >= config.codesize_max as usize {
+        bail!("file length exceeds {}", config.codesize_max)
+    }
     Ok((ticks, file))
 }
 
@@ -65,10 +75,14 @@ async fn ticks_from_field(field: Field<'_>) -> Result<u32> {
 }
 
 async fn submit_handler(
+    State(config): State<Arc<Config>>,
     Extension(task_send): Extension<Sender<SubmissionTask>>,
     multipart: Multipart,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let (ticks, source_code) = match parse_submit_inputs(multipart).await.context("parse input") {
+    let (ticks, source_code) = match parse_submit_inputs(multipart, config.as_ref())
+        .await
+        .context("parse input")
+    {
         Ok(x) => x,
         Err(e) => {
             debug!("Bad request: {e:#}");
@@ -152,8 +166,10 @@ pub async fn run(root_span: tracing::Span, listener: TcpListener, cfg: Config) {
             "/api",
             Router::new()
                 .route("/health", get(health_handler))
-                .route("/submit", post(submit_handler).layer(Extension(task_send)))
-                .route("/submission", get(submission_handler)),
+                .route("/submit", post(submit_handler))
+                .route("/submission", get(submission_handler))
+                .layer(Extension(task_send))
+                .with_state(config.clone()),
         )
         .fallback_service(ServeDir::new("static"))
         .layer(ServiceBuilder::new().layer(tower_http::cors::CorsLayer::permissive()))
@@ -167,8 +183,7 @@ pub async fn run(root_span: tracing::Span, listener: TcpListener, cfg: Config) {
                     version = ?request.version(),
                 )
             }),
-        )
-        .with_state(config.clone());
+        );
 
     let (res, _) = join!(axum::serve(listener, router), submission_actor,);
     res.unwrap();
@@ -176,6 +191,7 @@ pub async fn run(root_span: tracing::Span, listener: TcpListener, cfg: Config) {
 
 #[cfg(test)]
 mod tests {
+  
     use super::*;
 
     #[tokio::test]

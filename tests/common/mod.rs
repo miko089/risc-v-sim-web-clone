@@ -65,6 +65,8 @@ pub fn default_config(test_name: &str) -> risc_v_sim_web::Config {
             .unwrap_or_else(|_| "simulator".to_string())
             .into(),
         submissions_folder: format!("submissions-{test_name}").into(),
+        ticks_max: 15,
+        codesize_max: 256,
     }
 }
 
