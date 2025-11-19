@@ -89,7 +89,7 @@ async fn submission_task(config: Arc<Config>, task: SubmissionTask) {
         return;
     }
 
-    let sim_res = simulate(&config, task.ulid, task.source_code, task.ticks).await;
+    let sim_res = simulate(&config, task.ulid, task.source_code.clone(), task.ticks).await;
     let file_path = submission_file(config.as_ref(), task.ulid);
 
     let to_write = match sim_res {
