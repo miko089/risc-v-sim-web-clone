@@ -94,6 +94,53 @@ async fn submit_concurrent() {
     .await;
 }
 
+#[tokio::test]
+async fn codesize_max_restriction() {
+    run_test(
+        "codesize_max_restriction",
+        |_| {},
+        async |port| {
+            let client = reqwest::Client::new();
+            let submit_response = submit_program(&client, port, 5, "riscv-samples/src/big.s").await;
+            let submit_status = submit_response.status();
+            let resp_text = match submit_response.text().await {
+                Ok(x) => format!("Response as text: {x}"),
+                Err(e) => format!("Response has no text: {e}"),
+            };
+            assert_eq!(
+                submit_status,
+                reqwest::StatusCode::BAD_REQUEST,
+                "{resp_text}"
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn ticks_max_restriction() {
+    run_test(
+        "ticks_max_restriction",
+        |_| {},
+        async |port| {
+            let client = reqwest::Client::new();
+            let submit_response =
+                submit_program(&client, port, 100, "riscv-samples/src/basic.s").await;
+            let submit_status = submit_response.status();
+            let resp_text = match submit_response.text().await {
+                Ok(x) => format!("Response as text: {x}"),
+                Err(e) => format!("Response has no text: {e}"),
+            };
+            assert_eq!(
+                submit_status,
+                reqwest::StatusCode::BAD_REQUEST,
+                "{resp_text}"
+            );
+        },
+    )
+    .await;
+}
+
 async fn make_submission_and_wait_for_success(port: u16, source_file: impl AsRef<Path>) {
     let client = reqwest::Client::new();
 

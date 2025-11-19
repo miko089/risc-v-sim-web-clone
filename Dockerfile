@@ -21,6 +21,8 @@ RUN cargo build --release
 ENV SIMULATOR_BINARY="/usr/local/bin/risc-v-sim"
 ENV AS_BINARY="riscv64-linux-gnu-as"
 ENV LD_BINARY="riscv64-linux-gnu-ld"
+ENV CODESIZE_MAX="2048"
+ENV TICKS_MAX="128"
 
 EXPOSE 3000
 
