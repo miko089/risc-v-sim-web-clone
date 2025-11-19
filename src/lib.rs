@@ -60,10 +60,10 @@ pub async fn parse_submit_inputs(
     let Some(file) = file else {
         bail!("file field not set")
     };
-    if ticks >= config.ticks_max {
+    if ticks > config.ticks_max {
         bail!("ticks number exceeds {}", config.ticks_max)
     }
-    if file.len() >= config.codesize_max as usize {
+    if file.len() > config.codesize_max as usize {
         bail!("file length exceeds {}", config.codesize_max)
     }
     Ok((ticks, file))
