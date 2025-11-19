@@ -9,6 +9,7 @@ ENV PATH="/root/.cargo/bin:$PATH"
 COPY . /app
 
 WORKDIR /app/risc-v-sim
+RUN stat Cargo.toml
 RUN cargo build --release
 RUN cp target/release/risc-v-sim /usr/local/bin/
 RUN risc-v-sim --help
