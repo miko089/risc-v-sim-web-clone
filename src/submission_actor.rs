@@ -103,6 +103,7 @@ async fn submission_task(config: Arc<Config>, task: SubmissionTask) {
             json
         }
         Err(e) => {
+            error!("simulation failed: {e:#}");
             json!({
                 "error": format!("{e:?}"),
                 "ulid": task.ulid,
