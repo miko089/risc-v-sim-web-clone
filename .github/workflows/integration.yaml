@@ -9,35 +9,12 @@ env:
   RUST_VERSION: "1.89.0"
 
 jobs:    
-  build-risc-v-sim:
-    runs-on: ubuntu-24.04  
+  capture-traces: 
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: 'true'
-      - uses: actions/cache@v4
-        id: cache-build
-        continue-on-error: false
-        with:
-          path: risc-v-sim/target/
-          key: ci-integration-sim-cargo-${{ hashFiles('risc-v-sim/**/Cargo.lock') }}
-          restore-keys: ci-integration-sim-cargo-
-      - name: Build simulator binary
-        if: steps.cache-build.outputs.cache-hit != 'true'
-        # Build in debug for detailed backtraces
-        run: |
-          cd risc-v-sim
-          cargo build
-      - name: Upload simulator binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: simulator
-          path: ./risc-v-sim/target/debug/risc-v-sim
-  capture-traces:
-    runs-on: ubuntu-24.04
-    needs: build-risc-v-sim
-    steps:
-      - uses: actions/checkout@v4
       - uses: actions/cache@v4
         id: cache-artifacts
         continue-on-error: false
@@ -47,15 +24,14 @@ jobs:
             riscv-samples/traces
           key: ci-integration-samples-${{ hashFiles('riscv-samples/src/*', 'riscv-samples/cfg/*') }}
           restore-keys: ci-integration-cargo-
-      - name: Download simulator
-        uses: actions/download-artifact@v4
-        with:
-          name: simulator
-          path: ./riscv-samples
-      - run: chmod +x ./riscv-samples/risc-v-sim
       - name: build and capture
         if: steps.cache-artifacts.outputs.cache-hit != 'true'
-        run: docker run --rm --mount type=bind,src=./riscv-samples,dst=/ws krinkin/rv64-toolchain:latest make capture
+        run: |
+          cd risc-v-sim
+          cargo build
+          cd ..
+          cp risc-v-sim/target/debug/risc-v-sim ./riscv-samples
+          docker run --rm --mount type=bind,src=./riscv-samples,dst=/ws krinkin/rv64-toolchain:latest make capture
       - name: Upload traces
         uses: actions/upload-artifact@v4
         with:
@@ -64,7 +40,7 @@ jobs:
   run-tests:
     runs-on: ubuntu-24.04
     container: krinkin/rv64-toolchain
-    needs: [build-risc-v-sim, capture-traces]
+    needs: [capture-traces]
     steps:    
       # Required by the openssl crate
       # https://docs.rs/openssl/latest/openssl/#automatic
@@ -73,6 +49,8 @@ jobs:
           apt-get update 
           apt-get install -y pkg-config libssl-dev
       - uses: actions/checkout@v4
+        with:
+          submodules: 'true'
       - uses: actions/cache@v4
         id: cache-build
         continue-on-error: false
@@ -86,7 +64,7 @@ jobs:
             target/
           key: ci-integration-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ci-integration-cargo-
-      - name: Download Rust toolchain
+      - name: Download Rust toolchain and build
         if: steps.cache-build.outputs.cache-hit != 'true'
         run: |
           apt-get update
@@ -94,20 +72,20 @@ jobs:
           curl -O https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init
           chmod +x rustup-init
           ./rustup-init -y --no-modify-path --default-toolchain $RUST_VERSION
-      - name: Download simulator
-        uses: actions/download-artifact@v4
-        with:
-          name: simulator
-          path: tools
+      - name: Build RiscV sim
+        run: |
+          export PATH=~/.cargo/bin:$PATH
+          cd risc-v-sim
+          cargo build
       - name: Download traces
         uses: actions/download-artifact@v4
         with:
           name: traces
           path: traces
-      - run: |
+      - name: Run tests
+        run: |
           export PATH=~/.cargo/bin:$PATH
-          export SIMULATOR_BINARY=./tools/risc-v-sim
-          chmod u+x ./tools/risc-v-sim
+          export SIMULATOR_BINARY=./risc-v-sim/target/debug/risc-v-sim
           export AS_BINARY=riscv64-linux-gnu-as
           export LD_BINARY=riscv64-linux-gnu-ld
           cargo test --test "*" --locked -- --show-output

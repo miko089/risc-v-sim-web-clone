@@ -85,7 +85,7 @@ async fn simulate(
 async fn submission_task(config: Arc<Config>, task: SubmissionTask) {
     let sub_dir = submission_dir(&config, task.ulid);
     if let Err(e) = fs::create_dir_all(sub_dir).await {
-        error!("can't create submissiond_dir due to {e}");
+        error!("can't create submissiond_dir: {e:#}");
         return;
     }
 
@@ -103,6 +103,7 @@ async fn submission_task(config: Arc<Config>, task: SubmissionTask) {
             json
         }
         Err(e) => {
+            error!("simulation failed: {e:#}");
             json!({
                 "error": format!("{e:?}"),
                 "ulid": task.ulid,
@@ -113,7 +114,7 @@ async fn submission_task(config: Arc<Config>, task: SubmissionTask) {
     };
 
     if let Err(write_err) = fs::write(&file_path, to_write.to_string()).await {
-        error!("failed to write submission task result: {write_err}");
+        error!("failed to write submission task result: {write_err:#}");
     }
 }
 
