@@ -82,7 +82,8 @@ jobs:
         with:
           name: traces
           path: traces
-      - run: |
+      - name: Run tests
+        run: |
           export PATH=~/.cargo/bin:$PATH
           export SIMULATOR_BINARY=./risc-v-sim/target/debug/risc-v-sim
           export AS_BINARY=riscv64-linux-gnu-as
