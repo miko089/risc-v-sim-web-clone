@@ -11,9 +11,13 @@ path = "src/lib.rs"
 name = "risc-v-sim-web"
 path = "src/main.rs"
 
+[[bin]]
+name = "populate_db"
+path = "src/bin/populate_db.rs"
+
 [dependencies]
 axum = { version = "0.8.6", features = ["multipart", "query"] }
-tokio = { version = "1.48.0", features=[ "rt-multi-thread", "process", "fs", "sync" ] }
+tokio = { version = "1.48.0", features=[ "rt-multi-thread", "process", "fs", "sync", "signal", "macros" ] }
 tempfile = "3.19.1"
 serde_json = "1.0"
 anyhow = "1.0"
@@ -22,8 +26,17 @@ tracing = "0.1.41"
 tracing-subscriber = "0.3.2"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["fs", "cors", "trace"] }
+uuid = { version = "1.18.1", features = ["v4"] }
 ulid = { version = "1.2.1", features = ["serde"] }
 serde = { version = "1.0.228", features = ["derive"] }
+jsonwebtoken = "9.3"
+base64 = "0.22"
+oauth2 = "4.4"
+reqwest = { version = "0.12", features = ["json"] }
+chrono = { version = "0.4", features = ["serde"] }
+mongodb = "3.1"
+rand = "0.8"
+futures-util = "0.3"
 
 [dev-dependencies]
 reqwest = { version = "0.12.24", features = ["multipart", "stream"] }

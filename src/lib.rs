@@ -1,11 +1,14 @@
-mod submission_actor;
+pub mod submission_actor;
+pub mod auth;
+pub mod database;
 
 use anyhow::{Context, Result, bail};
 use axum::{
     Extension, Router,
     body::Body,
     extract::{Multipart, Query, State, multipart::Field},
-    http::{Request, StatusCode},
+    http::{Request, StatusCode, HeaderMap},
+    middleware::{self},
     response::Json,
     routing::{get, post},
 };
@@ -14,18 +17,21 @@ use serde::Deserialize;
 use serde_json::json;
 use std::io::ErrorKind;
 use std::sync::Arc;
-use tokio::join;
 use tokio::sync::mpsc::Sender;
 use tokio::{fs, net::TcpListener};
 use tower::ServiceBuilder;
 use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing::{Instrument, debug, error, info_span};
 use ulid::Ulid;
+use jsonwebtoken::{decode, DecodingKey, Validation};
 
-pub use submission_actor::Config;
-use submission_actor::submission_file;
+use submission_actor::{Config as ActorConfig, SubmissionTask, run_submission_actor, submission_file};
+use auth::{AuthState, Claims, auth_middleware};
 
-use crate::submission_actor::{SubmissionTask, run_submission_actor};
+pub struct Config {
+    pub actor_config: ActorConfig,
+    pub auth_state: AuthState,
+}
 
 #[derive(Deserialize)]
 pub struct Submission {
@@ -34,6 +40,30 @@ pub struct Submission {
 
 pub async fn health_handler() -> &'static str {
     "Ok"
+}
+
+fn extract_user_from_request(headers: &HeaderMap, auth_state: &AuthState) -> Result<(i64, String, Option<String>), StatusCode> {
+    let auth_header = headers
+        .get("cookie")
+        .and_then(|h| h.to_str().ok())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let token = auth_header
+        .split("jwt=")
+        .nth(1)
+        .and_then(|s| s.split(';').next())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let token_data = decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(auth_state.jwt_secret.as_ref()),
+        &Validation::default(),
+    )
+    .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    let claims = token_data.claims;
+    let user_id = claims.sub.parse().map_err(|_| StatusCode::UNAUTHORIZED)?;
+    Ok((user_id, claims.login, claims.name))
 }
 
 pub async fn parse_submit_inputs(
@@ -60,11 +90,11 @@ pub async fn parse_submit_inputs(
     let Some(file) = file else {
         bail!("file field not set")
     };
-    if ticks > config.ticks_max {
-        bail!("ticks number exceeds {}", config.ticks_max)
+    if ticks > config.actor_config.ticks_max {
+        bail!("ticks number exceeds {}", config.actor_config.ticks_max)
     }
-    if file.len() > config.codesize_max as usize {
-        bail!("file length exceeds {}", config.codesize_max)
+    if file.len() > config.actor_config.codesize_max as usize {
+        bail!("file length exceeds {}", config.actor_config.codesize_max)
     }
     Ok((ticks, file))
 }
@@ -77,8 +107,23 @@ async fn ticks_from_field(field: Field<'_>) -> Result<u32> {
 async fn submit_handler(
     State(config): State<Arc<Config>>,
     Extension(task_send): Extension<Sender<SubmissionTask>>,
+    headers: HeaderMap,
     multipart: Multipart,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    // Extract user information from request
+    let (user_id, user_login, user_name) = match extract_user_from_request(&headers, &config.auth_state) {
+        Ok(user_info) => user_info,
+        Err(e) => {
+            debug!("Authentication failed: {:#?}", e);
+            return (
+                e,
+                Json(serde_json::json!({
+                    "error": "Authentication required"
+                })),
+            );
+        }
+    };
+
     let (ticks, source_code) = match parse_submit_inputs(multipart, config.as_ref())
         .await
         .context("parse input")
@@ -100,11 +145,15 @@ async fn submit_handler(
     );
 
     let ulid = Ulid::new();
+    debug!("Creating submission for user {} ({})", user_login, user_id);
     let send_res = task_send
         .send(SubmissionTask {
             source_code,
             ticks,
             ulid,
+            user_id,
+            user_login,
+            user_name,
         })
         .await;
     if let Err(e) = send_res {
@@ -130,7 +179,7 @@ async fn submission_handler(
     State(config): State<Arc<Config>>,
     submission: Query<Submission>,
 ) -> (axum::http::StatusCode, Json<serde_json::Value>) {
-    let submission = submission_file(&config, submission.ulid);
+    let submission = submission_file(&config.actor_config, submission.ulid);
     let content = match fs::read(submission).await {
         Ok(x) => x,
         Err(e) => {
@@ -155,12 +204,50 @@ async fn submission_handler(
     (StatusCode::OK, json_content.unwrap())
 }
 
+async fn user_submissions_handler(
+    State(config): State<Arc<Config>>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<serde_json::Value>) {
+    // Extract user information from request
+    let (user_id, _user_login, _user_name) = match extract_user_from_request(&headers, &config.auth_state) {
+        Ok(user_info) => user_info,
+        Err(e) => {
+            debug!("Authentication failed: {:#?}", e);
+            return (
+                e,
+                Json(serde_json::json!({
+                    "error": "Authentication required"
+                })),
+            );
+        }
+    };
+
+    match config.actor_config.db_service.get_user_submissions(user_id).await {
+        Ok(submissions) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "submissions": submissions
+            })),
+        ),
+        Err(e) => {
+            error!("Failed to fetch user submissions: {:#?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Failed to fetch submissions"
+                })),
+            )
+        }
+    }
+}
+
 pub async fn run(root_span: tracing::Span, listener: TcpListener, cfg: Config) {
     let (task_send, task_recv) = tokio::sync::mpsc::channel::<SubmissionTask>(100);
     let config = Arc::new(cfg);
 
-    let submission_actor =
-        run_submission_actor(config.clone(), task_recv).instrument(info_span!("submission_actor"));
+    let submission_actor = run_submission_actor(Arc::new(config.actor_config.clone()), task_recv)
+        .instrument(info_span!("submission_actor"));
+
     let router = Router::new()
         .nest(
             "/api",
@@ -168,11 +255,33 @@ pub async fn run(root_span: tracing::Span, listener: TcpListener, cfg: Config) {
                 .route("/health", get(health_handler))
                 .route("/submit", post(submit_handler))
                 .route("/submission", get(submission_handler))
+                .route("/user-submissions", get(user_submissions_handler))
+                .nest(
+                    "/auth",
+                    Router::new()
+                        .route("/login", get(auth::login_handler))
+                        .route("/callback", get(auth::callback_handler))
+                        .route("/logout", get(auth::logout_handler))
+                        .route("/me", get(auth::me_handler)),
+                )
                 .layer(Extension(task_send))
+                .with_state(config.clone()),
+        )
+        .nest(
+            "/auth",
+            Router::new()
+                .route("/login", get(auth::login_handler))
+                .route("/callback", get(auth::callback_handler))
+                .route("/logout", get(auth::logout_handler))
+                .route("/me", get(auth::me_handler))
                 .with_state(config.clone()),
         )
         .fallback_service(ServeDir::new("static"))
         .layer(ServiceBuilder::new().layer(tower_http::cors::CorsLayer::permissive()))
+        .layer(middleware::from_fn_with_state(
+            config.clone(),
+            auth_middleware,
+        ))
         .layer(
             TraceLayer::new_for_http().make_span_with(move |request: &Request<Body>| {
                 tracing::debug_span!(
@@ -185,8 +294,11 @@ pub async fn run(root_span: tracing::Span, listener: TcpListener, cfg: Config) {
             }),
         );
 
-    let (res, _) = join!(axum::serve(listener, router), submission_actor,);
-    res.unwrap();
+    tokio::spawn(submission_actor);
+
+    axum::serve(listener, router)
+        .await
+        .unwrap();
 }
 
 #[cfg(test)]

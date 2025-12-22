@@ -4,6 +4,7 @@ use serde_json::json;
 use std::path::Path;
 use std::path::PathBuf;
 use tokio::fs;
+use std::future::Future;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -13,13 +14,19 @@ use tokio::sync::mpsc::Receiver;
 use tokio::time::timeout;
 use tracing::{Instrument, debug, error, info, info_span};
 use ulid::{ULID_LEN, Ulid};
+use crate::database::{DatabaseService, SubmissionStatus};
 
+#[derive(Debug)]
 pub struct SubmissionTask {
     pub source_code: Bytes,
     pub ticks: u32,
     pub ulid: Ulid,
+    pub user_id: i64,
+    pub user_login: String,
+    pub user_name: Option<String>,
 }
 
+#[derive(Clone)]
 pub struct Config {
     pub as_binary: PathBuf,
     pub ld_binary: PathBuf,
@@ -27,6 +34,7 @@ pub struct Config {
     pub submissions_folder: PathBuf,
     pub ticks_max: u32,
     pub codesize_max: u32,
+    pub db_service: Arc<DatabaseService>,
 }
 
 pub async fn run_submission_actor(config: Arc<Config>, mut tasks: Receiver<SubmissionTask>) {
@@ -83,16 +91,36 @@ async fn simulate(
 }
 
 async fn submission_task(config: Arc<Config>, task: SubmissionTask) {
-    let sub_dir = submission_dir(&config, task.ulid);
-    if let Err(e) = fs::create_dir_all(sub_dir).await {
-        error!("can't create submissiond_dir: {e:#}");
+    let ulid_str = task.ulid.to_string();
+    info!("Processing submission {} for user {} ({})", ulid_str, task.user_login, task.user_id);
+
+    // Create submission record in database
+    if let Err(e) = config.db_service.create_submission_with_user(
+        ulid_str.clone(),
+        task.user_id,
+    ).await {
+        error!("Failed to create submission record in database: {e:#}");
         return;
+    }
+
+    let sub_dir = submission_dir(&config, task.ulid);
+    if let Err(e) = fs::create_dir_all(&sub_dir).await {
+        error!("can't create submission_dir: {e:#}");
+        return;
+    }
+
+    // Update status to InProgress when starting compilation
+    if let Err(e) = config.db_service.update_submission_status(
+        &ulid_str,
+        SubmissionStatus::InProgress,
+    ).await {
+        error!("Failed to update submission status to InProgress: {e:#}");
     }
 
     let sim_res = simulate(&config, task.ulid, task.source_code.clone(), task.ticks).await;
     let file_path = submission_file(config.as_ref(), task.ulid);
 
-    let to_write = match sim_res {
+    let (final_status, to_write) = match sim_res {
         Ok(mut json) => {
             // Ensure ulid is always present
             if let serde_json::Value::Object(map) = &mut json {
@@ -100,22 +128,33 @@ async fn submission_task(config: Arc<Config>, task: SubmissionTask) {
                     map.insert("ulid".to_string(), json!(task.ulid));
                 }
             }
-            json
+            (SubmissionStatus::Completed, json)
         }
         Err(e) => {
             error!("simulation failed: {e:#}");
-            json!({
+            (SubmissionStatus::Completed, json!({
                 "error": format!("{e:?}"),
                 "ulid": task.ulid,
                 "ticks": task.ticks,
                 "code": String::from_utf8_lossy(&task.source_code)
-            })
+            }))
         }
     };
 
+    // Write result file
     if let Err(write_err) = fs::write(&file_path, to_write.to_string()).await {
         error!("failed to write submission task result: {write_err:#}");
     }
+
+    // Update final status in database
+    if let Err(e) = config.db_service.update_submission_status(
+        &ulid_str,
+        final_status,
+    ).await {
+        error!("Failed to update final submission status: {e:#}");
+    }
+
+    info!("Completed submission {} with status {:?}", ulid_str, final_status);
 }
 
 pub fn submission_dir(config: &Config, ulid: Ulid) -> PathBuf {
@@ -213,8 +252,11 @@ async fn run_simulator(config: &Config, submission_dir: &Path, ticks: u32) -> Re
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_path_utils() {
+    #[tokio::test]
+    async fn test_path_utils() {
+        // Create a dummy database service for testing
+        let db_service = DatabaseService::new().await.expect("Failed to create test database service");
+
         let config = Config {
             as_binary: "dummy".into(),
             ld_binary: "dummy".into(),
@@ -222,6 +264,7 @@ mod tests {
             submissions_folder: "submissions".into(),
             ticks_max: u32::MAX,
             codesize_max: u32::MAX,
+            db_service: Arc::new(db_service),
         };
         for _ in 0..10 {
             let ulid = Ulid::new();
