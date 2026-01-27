@@ -1,18 +1,19 @@
-pub mod submission_actor;
 pub mod auth;
 pub mod database;
+pub mod submission_actor;
 
 use anyhow::{Context, Result, bail};
 use axum::{
     Extension, Router,
     body::Body,
     extract::{Multipart, Query, State, multipart::Field},
-    http::{Request, StatusCode, HeaderMap},
+    http::{HeaderMap, Request, StatusCode},
     middleware::{self},
     response::Json,
     routing::{get, post},
 };
 use bytes;
+use jsonwebtoken::{DecodingKey, Validation, decode};
 use serde::Deserialize;
 use serde_json::json;
 use std::io::ErrorKind;
@@ -23,10 +24,11 @@ use tower::ServiceBuilder;
 use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing::{Instrument, debug, error, info_span};
 use ulid::Ulid;
-use jsonwebtoken::{decode, DecodingKey, Validation};
 
-use submission_actor::{Config as ActorConfig, SubmissionTask, run_submission_actor, submission_file};
 use auth::{AuthState, Claims, auth_middleware};
+use submission_actor::{
+    Config as ActorConfig, SubmissionTask, run_submission_actor, submission_file,
+};
 
 pub struct Config {
     pub actor_config: ActorConfig,
@@ -42,7 +44,10 @@ pub async fn health_handler() -> &'static str {
     "Ok"
 }
 
-fn extract_user_from_request(headers: &HeaderMap, auth_state: &AuthState) -> Result<(i64, String, Option<String>), StatusCode> {
+fn extract_user_from_request(
+    headers: &HeaderMap,
+    auth_state: &AuthState,
+) -> Result<(i64, String, Option<String>), StatusCode> {
     let auth_header = headers
         .get("cookie")
         .and_then(|h| h.to_str().ok())
@@ -111,18 +116,19 @@ async fn submit_handler(
     multipart: Multipart,
 ) -> (StatusCode, Json<serde_json::Value>) {
     // Extract user information from request
-    let (user_id, user_login, user_name) = match extract_user_from_request(&headers, &config.auth_state) {
-        Ok(user_info) => user_info,
-        Err(e) => {
-            debug!("Authentication failed: {:#?}", e);
-            return (
-                e,
-                Json(serde_json::json!({
-                    "error": "Authentication required"
-                })),
-            );
-        }
-    };
+    let (user_id, user_login, user_name) =
+        match extract_user_from_request(&headers, &config.auth_state) {
+            Ok(user_info) => user_info,
+            Err(e) => {
+                debug!("Authentication failed: {:#?}", e);
+                return (
+                    e,
+                    Json(serde_json::json!({
+                        "error": "Authentication required"
+                    })),
+                );
+            }
+        };
 
     let (ticks, source_code) = match parse_submit_inputs(multipart, config.as_ref())
         .await
@@ -209,20 +215,26 @@ async fn user_submissions_handler(
     headers: HeaderMap,
 ) -> (StatusCode, Json<serde_json::Value>) {
     // Extract user information from request
-    let (user_id, _user_login, _user_name) = match extract_user_from_request(&headers, &config.auth_state) {
-        Ok(user_info) => user_info,
-        Err(e) => {
-            debug!("Authentication failed: {:#?}", e);
-            return (
-                e,
-                Json(serde_json::json!({
-                    "error": "Authentication required"
-                })),
-            );
-        }
-    };
+    let (user_id, _user_login, _user_name) =
+        match extract_user_from_request(&headers, &config.auth_state) {
+            Ok(user_info) => user_info,
+            Err(e) => {
+                debug!("Authentication failed: {:#?}", e);
+                return (
+                    e,
+                    Json(serde_json::json!({
+                        "error": "Authentication required"
+                    })),
+                );
+            }
+        };
 
-    match config.actor_config.db_service.get_user_submissions(user_id).await {
+    match config
+        .actor_config
+        .db_service
+        .get_user_submissions(user_id)
+        .await
+    {
         Ok(submissions) => (
             StatusCode::OK,
             Json(serde_json::json!({
@@ -296,9 +308,7 @@ pub async fn run(root_span: tracing::Span, listener: TcpListener, cfg: Config) {
 
     tokio::spawn(submission_actor);
 
-    axum::serve(listener, router)
-        .await
-        .unwrap();
+    axum::serve(listener, router).await.unwrap();
 }
 
 #[cfg(test)]

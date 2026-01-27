@@ -1,12 +1,12 @@
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::path::Path;
 
+use chrono::{Duration, Utc};
+use jsonwebtoken::{EncodingKey, Header, encode};
 use reqwest::{Client, Response, Url};
 use tokio::{net::TcpListener, task::JoinHandle};
 use tracing::{Instrument, Level, Span, info};
 use ulid::Ulid;
-use chrono::{Duration, Utc};
-use jsonwebtoken::{encode, EncodingKey, Header};
 
 pub async fn run_test<Patch, Body, F>(test_name: &str, patch_cfg: Patch, body: Body)
 where
@@ -57,7 +57,9 @@ pub async fn default_config(test_name: &str) -> risc_v_sim_web::Config {
         jwt_secret: jwt_secret.to_string(),
     };
 
-    let db_service = risc_v_sim_web::database::DatabaseService::new().await.unwrap();
+    let db_service = risc_v_sim_web::database::DatabaseService::new()
+        .await
+        .unwrap();
 
     risc_v_sim_web::Config {
         actor_config: risc_v_sim_web::submission_actor::Config {
@@ -102,7 +104,11 @@ pub async fn submit_program(
     path: impl AsRef<Path>,
 ) -> Response {
     let request_url = server_url(port).join("api/submit").unwrap();
-    let token = generate_test_token("123456", "testuser", "test_secret_key_for_integration_tests");
+    let token = generate_test_token(
+        "123456",
+        "testuser",
+        "test_secret_key_for_integration_tests",
+    );
     let cookie = format!("jwt={}", token);
 
     let form = reqwest::multipart::Form::new()
@@ -121,7 +127,11 @@ pub async fn submit_program(
 
 pub async fn get_submission(client: &Client, port: u16, submission_id: Ulid) -> Response {
     let request_url = server_url(port).join("api/submission").unwrap();
-    let token = generate_test_token("123456", "testuser", "test_secret_key_for_integration_tests");
+    let token = generate_test_token(
+        "123456",
+        "testuser",
+        "test_secret_key_for_integration_tests",
+    );
     let cookie = format!("jwt={}", token);
 
     client

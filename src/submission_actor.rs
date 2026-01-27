@@ -1,11 +1,12 @@
 use anyhow::{Context, Result, bail};
 use bytes::Bytes;
 use serde_json::json;
+use std::future::Future;
 use std::path::Path;
 use std::path::PathBuf;
 use tokio::fs;
-use std::future::Future;
 
+use crate::database::{DatabaseService, SubmissionStatus};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
@@ -14,7 +15,6 @@ use tokio::sync::mpsc::Receiver;
 use tokio::time::timeout;
 use tracing::{Instrument, debug, error, info, info_span};
 use ulid::{ULID_LEN, Ulid};
-use crate::database::{DatabaseService, SubmissionStatus};
 
 #[derive(Debug)]
 pub struct SubmissionTask {
@@ -92,13 +92,17 @@ async fn simulate(
 
 async fn submission_task(config: Arc<Config>, task: SubmissionTask) {
     let ulid_str = task.ulid.to_string();
-    info!("Processing submission {} for user {} ({})", ulid_str, task.user_login, task.user_id);
+    info!(
+        "Processing submission {} for user {} ({})",
+        ulid_str, task.user_login, task.user_id
+    );
 
     // Create submission record in database
-    if let Err(e) = config.db_service.create_submission_with_user(
-        ulid_str.clone(),
-        task.user_id,
-    ).await {
+    if let Err(e) = config
+        .db_service
+        .create_submission_with_user(ulid_str.clone(), task.user_id)
+        .await
+    {
         error!("Failed to create submission record in database: {e:#}");
         return;
     }
@@ -110,10 +114,11 @@ async fn submission_task(config: Arc<Config>, task: SubmissionTask) {
     }
 
     // Update status to InProgress when starting compilation
-    if let Err(e) = config.db_service.update_submission_status(
-        &ulid_str,
-        SubmissionStatus::InProgress,
-    ).await {
+    if let Err(e) = config
+        .db_service
+        .update_submission_status(&ulid_str, SubmissionStatus::InProgress)
+        .await
+    {
         error!("Failed to update submission status to InProgress: {e:#}");
     }
 
@@ -132,12 +137,15 @@ async fn submission_task(config: Arc<Config>, task: SubmissionTask) {
         }
         Err(e) => {
             error!("simulation failed: {e:#}");
-            (SubmissionStatus::Completed, json!({
-                "error": format!("{e:?}"),
-                "ulid": task.ulid,
-                "ticks": task.ticks,
-                "code": String::from_utf8_lossy(&task.source_code)
-            }))
+            (
+                SubmissionStatus::Completed,
+                json!({
+                    "error": format!("{e:?}"),
+                    "ulid": task.ulid,
+                    "ticks": task.ticks,
+                    "code": String::from_utf8_lossy(&task.source_code)
+                }),
+            )
         }
     };
 
@@ -147,14 +155,18 @@ async fn submission_task(config: Arc<Config>, task: SubmissionTask) {
     }
 
     // Update final status in database
-    if let Err(e) = config.db_service.update_submission_status(
-        &ulid_str,
-        final_status,
-    ).await {
+    if let Err(e) = config
+        .db_service
+        .update_submission_status(&ulid_str, final_status)
+        .await
+    {
         error!("Failed to update final submission status: {e:#}");
     }
 
-    info!("Completed submission {} with status {:?}", ulid_str, final_status);
+    info!(
+        "Completed submission {} with status {:?}",
+        ulid_str, final_status
+    );
 }
 
 pub fn submission_dir(config: &Config, ulid: Ulid) -> PathBuf {
@@ -255,7 +267,9 @@ mod tests {
     #[tokio::test]
     async fn test_path_utils() {
         // Create a dummy database service for testing
-        let db_service = DatabaseService::new().await.expect("Failed to create test database service");
+        let db_service = DatabaseService::new()
+            .await
+            .expect("Failed to create test database service");
 
         let config = Config {
             as_binary: "dummy".into(),
