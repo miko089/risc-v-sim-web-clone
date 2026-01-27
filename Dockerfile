@@ -1,7 +1,7 @@
 FROM krinkin/rv64-toolchain:latest
 
 # Install dependencies and Rust
-RUN apt-get update && apt-get install -y curl && \
+RUN apt-get update && apt-get install -y curl pkg-config libssl-dev && \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 ENV PATH="/root/.cargo/bin:$PATH"
