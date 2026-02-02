@@ -18,12 +18,25 @@ RUN risc-v-sim --help
 WORKDIR /app
 RUN cargo build --release
 
-# Set environment variables
+# Set default environment variables (can be overridden at runtime)
 ENV SIMULATOR_BINARY="/usr/local/bin/risc-v-sim"
 ENV AS_BINARY="riscv64-linux-gnu-as"
 ENV LD_BINARY="riscv64-linux-gnu-ld"
 ENV CODESIZE_MAX="2048"
 ENV TICKS_MAX="128"
+ENV MONGODB_URI="mongodb://host.docker.internal:27017"
+ENV MONGODB_DB="riscv_sim"
+ENV SUBMISSIONS_FOLDER="submission"
+
+# GitHub OAuth - Set these at runtime with -e flags
+ENV GITHUB_CLIENT_ID=""
+ENV GITHUB_CLIENT_SECRET=""
+
+# JWT Secret - Set at runtime with -e flag
+ENV JWT_SECRET=""
+
+# Create submissions directory
+RUN mkdir -p /app/submission
 
 EXPOSE 3000
 
