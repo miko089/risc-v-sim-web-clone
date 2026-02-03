@@ -69,6 +69,8 @@ jobs:
           cd ..
           cp risc-v-sim/target/debug/risc-v-sim ./riscv-samples
           docker run --rm --mount type=bind,src=./riscv-samples,dst=/ws krinkin/rv64-toolchain:latest make capture
+          mkdir -p traces
+          cp riscv-samples/traces/*.json traces/
       - name: Build and start services with docker-compose
         run: |
           docker compose -f docker-compose.ci.yml build
