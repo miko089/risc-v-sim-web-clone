@@ -62,6 +62,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: 'true'
+      - name: Capture traces
+        run: |
+          cd risc-v-sim
+          cargo build --locked
+          cd ..
+          cp risc-v-sim/target/debug/risc-v-sim ./riscv-samples
+          docker run --rm --mount type=bind,src=./riscv-samples,dst=/ws krinkin/rv64-toolchain:latest make capture
       - name: Build and start services with docker-compose
         run: |
           docker compose -f docker-compose.ci.yml build
