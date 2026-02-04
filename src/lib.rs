@@ -115,7 +115,7 @@ async fn submit_handler(
     headers: HeaderMap,
     multipart: Multipart,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let (user_id, user_login, user_name) =
+    let (user_id, user_login, _user_name) =
         match extract_user_from_request(&headers, &config.auth_state) {
             Ok(user_info) => user_info,
             Err(e) => {
@@ -157,8 +157,6 @@ async fn submit_handler(
             ticks,
             ulid,
             user_id,
-            user_login,
-            user_name,
         })
         .await;
     if let Err(e) = send_res {

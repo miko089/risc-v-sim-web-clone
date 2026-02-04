@@ -22,8 +22,6 @@ pub struct SubmissionTask {
     pub ticks: u32,
     pub ulid: Ulid,
     pub user_id: i64,
-    pub user_login: String,
-    pub user_name: Option<String>,
 }
 
 #[derive(Clone)]
@@ -92,10 +90,7 @@ async fn simulate(
 
 async fn submission_task(config: Arc<Config>, task: SubmissionTask) {
     let ulid_str = task.ulid.to_string();
-    info!(
-        "Processing submission {} for user {} ({})",
-        ulid_str, task.user_login, task.user_id
-    );
+    info!("Processing submission {}", ulid_str);
 
     if let Err(e) = config
         .db_service
