@@ -12,7 +12,7 @@ pub async fn run_test<Patch, Body, F>(test_name: &str, patch_cfg: Patch, body: B
 where
     Patch: FnOnce(&mut risc_v_sim_web::Config),
     Body: FnOnce(u16) -> F,
-    F: futures_util::Future<Output = ()>,
+    F: Future<Output = ()>,
 {
     init_test();
     let mut cfg = default_config(test_name).await;
@@ -39,7 +39,7 @@ pub async fn spawn_server(span: &Span, cfg: risc_v_sim_web::Config) -> (u16, Joi
 
 async fn make_listener() -> (u16, TcpListener) {
     let address = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
-    let listener = tokio::net::TcpListener::bind(address).await.unwrap();
+    let listener = TcpListener::bind(address).await.unwrap();
     let port = listener.local_addr().unwrap().port();
     info!("Listening on port {port}");
     (port, listener)
@@ -47,8 +47,8 @@ async fn make_listener() -> (u16, TcpListener) {
 
 pub async fn default_config(test_name: &str) -> risc_v_sim_web::Config {
     let jwt_secret = "test_secret_key_for_integration_tests";
-    let auth_state = risc_v_sim_web::auth::AuthState {
-        client: oauth2::Client::new(
+    let auth_state = risc_v_sim_web::auth::AuthConfig {
+        oauth_client: oauth2::Client::new(
             oauth2::ClientId::new("test_client_id".to_string()),
             Some(oauth2::ClientSecret::new("test_client_secret".to_string())),
             oauth2::AuthUrl::new("https://example.com/auth".to_string()).unwrap(),
@@ -77,7 +77,7 @@ pub async fn default_config(test_name: &str) -> risc_v_sim_web::Config {
             codesize_max: 256,
             db_service: std::sync::Arc::new(db_service),
         },
-        auth_state: auth_state,
+        auth_state,
     }
 }
 
@@ -86,7 +86,7 @@ pub fn generate_test_token(user_id: &str, login: &str, jwt_secret: &str) -> Stri
         sub: user_id.to_string(),
         login: login.to_string(),
         name: Some("Test User".to_string()),
-        exp: (Utc::now() + Duration::hours(24)).timestamp(),
+        expires: (Utc::now() + Duration::hours(24)).timestamp(),
     };
 
     encode(

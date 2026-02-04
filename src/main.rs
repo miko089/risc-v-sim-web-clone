@@ -16,7 +16,7 @@ async fn main() -> Result<()> {
 
     let ticks_max: u32 = std::env::var("TICKS_MAX")?.parse()?;
     let codesize_max: u32 = std::env::var("CODESIZE_MAX")?.parse()?;
-    let auth_state = risc_v_sim_web::auth::create_auth_state()?;
+    let auth_state = risc_v_sim_web::auth::create_auth_config()?;
 
     risc_v_sim_web::database::init_database().await?;
     let db_service = risc_v_sim_web::database::DatabaseService::new().await?;

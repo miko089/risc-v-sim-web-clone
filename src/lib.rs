@@ -25,14 +25,14 @@ use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing::{Instrument, debug, error, info_span};
 use ulid::Ulid;
 
-use auth::{AuthState, Claims, auth_middleware};
+use auth::{AuthConfig, Claims, auth_middleware};
 use submission_actor::{
     Config as ActorConfig, SubmissionTask, run_submission_actor, submission_file,
 };
 
 pub struct Config {
     pub actor_config: ActorConfig,
-    pub auth_state: AuthState,
+    pub auth_state: AuthConfig,
 }
 
 #[derive(Deserialize)]
@@ -46,7 +46,7 @@ pub async fn health_handler() -> &'static str {
 
 fn extract_user_from_request(
     headers: &HeaderMap,
-    auth_state: &AuthState,
+    auth_state: &AuthConfig,
 ) -> Result<(i64, String, Option<String>), StatusCode> {
     let auth_header = headers
         .get("cookie")
@@ -138,7 +138,7 @@ async fn submit_handler(
             debug!("Bad request: {e:#}");
             return (
                 StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({
+                Json(json!({
                     "error": format!("{e:#}"),
                 })),
             );

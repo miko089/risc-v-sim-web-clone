@@ -7,6 +7,7 @@ use axum::{
     response::{IntoResponse, Json, Redirect, Response},
     routing::{get, post},
 };
+use axum_extra::extract::cookie::Cookie;
 use chrono::{Duration, Utc};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use oauth2::{
@@ -25,8 +26,8 @@ pub struct User {
 }
 
 #[derive(Debug, Clone)]
-pub struct AuthState {
-    pub client: BasicClient,
+pub struct AuthConfig {
+    pub oauth_client: BasicClient,
     pub jwt_secret: String,
 }
 
@@ -43,13 +44,15 @@ pub struct AuthResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
+    // 'sub' is default in jwt, according to https://jwt.io
+    // it means "Subject (whom the token refers to)"
     pub sub: String,
     pub login: String,
     pub name: Option<String>,
-    pub exp: i64,
+    pub expires: i64,
 }
 
-pub fn create_auth_state() -> Result<AuthState> {
+pub fn create_auth_config() -> Result<AuthConfig> {
     let client_id = std::env::var("GITHUB_CLIENT_ID").context("GITHUB_CLIENT_ID not set")?;
     let client_secret =
         std::env::var("GITHUB_CLIENT_SECRET").context("GITHUB_CLIENT_SECRET not set")?;
@@ -74,7 +77,10 @@ pub fn create_auth_state() -> Result<AuthState> {
 
     tracing::info!("OAuth client created successfully");
 
-    Ok(AuthState { client, jwt_secret })
+    Ok(AuthConfig {
+        oauth_client: client,
+        jwt_secret,
+    })
 }
 
 pub async fn login_handler(
@@ -82,7 +88,7 @@ pub async fn login_handler(
 ) -> Result<Redirect, StatusCode> {
     let (auth_url, _csrf_token) = config
         .auth_state
-        .client
+        .oauth_client
         .authorize_url(CsrfToken::new_random)
         .add_scope(Scope::new("user:email".to_string()))
         .add_scope(Scope::new("read:user".to_string()))
@@ -115,7 +121,7 @@ pub async fn callback_handler(
 
     let token_response = config
         .auth_state
-        .client
+        .oauth_client
         .exchange_code(code)
         .request_async(async_http_client)
         .await
@@ -157,7 +163,7 @@ pub async fn callback_handler(
         sub: user_id.clone(),
         login: login.clone(),
         name,
-        exp: (Utc::now() + Duration::hours(24 * 7)).timestamp(),
+        expires: (Utc::now() + Duration::hours(24 * 7)).timestamp(),
     };
 
     let token = encode(
@@ -189,19 +195,24 @@ pub async fn me_handler(
     State(config): State<Arc<crate::Config>>,
     headers: HeaderMap,
 ) -> Result<Json<AuthResponse>, StatusCode> {
-    let auth_header = headers
+    let cookie = headers
         .get("cookie")
         .and_then(|h| h.to_str().ok())
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    let token = auth_header
-        .split("jwt=")
-        .nth(1)
-        .and_then(|s| s.split(';').next())
-        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let cookie_value = Cookie::parse(cookie.to_owned()).map_err(|_e| StatusCode::UNAUTHORIZED)?;
+
+    let token = {
+        let (name, value) = cookie_value.name_value();
+        if name == "jwt" {
+            value
+        } else {
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+    };
 
     let token_data = decode::<Claims>(
-        token,
+        &token,
         &DecodingKey::from_secret(config.auth_state.jwt_secret.as_ref()),
         &Validation::default(),
     )
