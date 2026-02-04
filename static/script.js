@@ -1260,7 +1260,9 @@ class AuthManager {
 
     async logout() {
         try {
-            await fetch('/auth/logout');
+            await fetch('/auth/logout', {
+                method: "POST",
+            });
             window.location.reload();
         } catch (error) {
             console.error('Logout error:', error);

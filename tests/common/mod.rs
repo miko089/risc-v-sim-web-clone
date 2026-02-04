@@ -86,7 +86,7 @@ pub fn generate_test_token(user_id: &str, login: &str, jwt_secret: &str) -> Stri
         sub: user_id.to_string(),
         login: login.to_string(),
         name: Some("Test User".to_string()),
-        expires: (Utc::now() + Duration::hours(24)).timestamp(),
+        exp: (Utc::now() + Duration::hours(24)).timestamp(),
     };
 
     encode(

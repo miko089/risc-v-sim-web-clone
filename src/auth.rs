@@ -44,12 +44,12 @@ pub struct AuthResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
-    // 'sub' is default in jwt, according to https://jwt.io
-    // it means "Subject (whom the token refers to)"
+    // 'sub' is default in jwt, according to https://datatracker.ietf.org/doc/html/rfc7519#section-4.1.2
+    // it means "Subject (whom the token refers to)", as well as 'exp'
     pub sub: String,
     pub login: String,
     pub name: Option<String>,
-    pub expires: i64,
+    pub exp: i64,
 }
 
 pub fn create_auth_config() -> Result<AuthConfig> {
@@ -163,7 +163,7 @@ pub async fn callback_handler(
         sub: user_id.clone(),
         login: login.clone(),
         name,
-        expires: (Utc::now() + Duration::hours(24 * 7)).timestamp(),
+        exp: (Utc::now() + Duration::hours(24 * 7)).timestamp(),
     };
 
     let token = encode(
@@ -231,7 +231,7 @@ pub async fn me_handler(
 
 pub fn auth_routes() -> Router<Arc<crate::Config>> {
     Router::new()
-        .route("/login", post(login_handler))
+        .route("/login", get(login_handler)) // get because it doesn't do anything, just redirects to "actual" login page
         .route("/callback", get(callback_handler))
         .route("/logout", post(logout_handler))
         .route("/me", get(me_handler))
