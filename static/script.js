@@ -386,15 +386,14 @@ class SubmissionsPage {
             return;
         }
 
-        const submissionsHtml = this.submissions.map((submission, index) => 
+        container.innerHTML = this.submissions.map((submission, index) =>
             this.renderSubmission(submission, index)
         ).join('');
-
-        container.innerHTML = submissionsHtml;
         this.setupSubmissionHandlers();
     }
 
     renderSubmission(submission, index) {
+        this._index = index;
         const date = new Date(submission.timestamp);
         const formattedDate = date.toLocaleString();
 
@@ -1221,7 +1220,7 @@ class AuthManager {
 
     async checkAuthStatus() {
         try {
-            const response = await fetch('/api/auth/me');
+            const response = await fetch('/auth/me');
             if (response.ok) {
                 const data = await response.json();
                 this.showUserInfo(data.user);

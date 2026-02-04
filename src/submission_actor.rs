@@ -61,7 +61,7 @@ async fn future_with_timeout<T>(
 async fn simulate(
     config: &Config,
     ulid: Ulid,
-    source_code: bytes::Bytes,
+    source_code: Bytes,
     ticks: u32,
 ) -> Result<serde_json::Value> {
     let submission_dir = submission_dir(config, ulid);
@@ -96,8 +96,7 @@ async fn submission_task(config: Arc<Config>, task: SubmissionTask) {
         "Processing submission {} for user {} ({})",
         ulid_str, task.user_login, task.user_id
     );
-
-    // Create submission record in database
+    
     if let Err(e) = config
         .db_service
         .create_submission_with_user(ulid_str.clone(), task.user_id)
@@ -112,8 +111,7 @@ async fn submission_task(config: Arc<Config>, task: SubmissionTask) {
         error!("can't create submission_dir: {e:#}");
         return;
     }
-
-    // Update status to InProgress when starting compilation
+    
     if let Err(e) = config
         .db_service
         .update_submission_status(&ulid_str, SubmissionStatus::InProgress)
@@ -127,7 +125,6 @@ async fn submission_task(config: Arc<Config>, task: SubmissionTask) {
 
     let (final_status, to_write) = match sim_res {
         Ok(mut json) => {
-            // Ensure ulid is always present
             if let serde_json::Value::Object(map) = &mut json {
                 if !map.contains_key("ulid") {
                     map.insert("ulid".to_string(), json!(task.ulid));
@@ -149,12 +146,10 @@ async fn submission_task(config: Arc<Config>, task: SubmissionTask) {
         }
     };
 
-    // Write result file
     if let Err(write_err) = fs::write(&file_path, to_write.to_string()).await {
         error!("failed to write submission task result: {write_err:#}");
     }
 
-    // Update final status in database
     if let Err(e) = config
         .db_service
         .update_submission_status(&ulid_str, final_status)
@@ -266,7 +261,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_path_utils() {
-        // Create a dummy database service for testing
         let db_service = DatabaseService::new()
             .await
             .expect("Failed to create test database service");

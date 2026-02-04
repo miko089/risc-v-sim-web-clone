@@ -5,7 +5,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     middleware::Next,
     response::{IntoResponse, Json, Redirect, Response},
-    routing::get,
+    routing::{get, post},
 };
 use chrono::{Duration, Utc};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
@@ -220,9 +220,9 @@ pub async fn me_handler(
 
 pub fn auth_routes() -> Router<Arc<crate::Config>> {
     Router::new()
-        .route("/login", get(login_handler))
+        .route("/login", post(login_handler))
         .route("/callback", get(callback_handler))
-        .route("/logout", get(logout_handler))
+        .route("/logout", post(logout_handler))
         .route("/me", get(me_handler))
 }
 
@@ -246,21 +246,21 @@ pub async fn auth_middleware(
             .nth(1)
             .and_then(|s| s.split(';').next())
         {
-            match decode::<Claims>(
+            return match decode::<Claims>(
                 token,
                 &DecodingKey::from_secret(config.auth_state.jwt_secret.as_ref()),
                 &Validation::default(),
             ) {
                 Ok(_) => {
-                    return next.run(request).await;
+                    next.run(request).await
                 }
                 Err(e) => {
                     tracing::warn!("Invalid JWT token: {:?}", e);
-                    return (
+                    (
                         StatusCode::UNAUTHORIZED,
                         Json(serde_json::json!({"error": "Invalid authorization token"})),
                     )
-                        .into_response();
+                        .into_response()
                 }
             }
         }

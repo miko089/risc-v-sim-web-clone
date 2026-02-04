@@ -7,22 +7,19 @@ use ulid::Ulid;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize database connection
     let db_service = DatabaseService::new().await?;
 
-    // Test user IDs
     let test_user_ids = vec![
-        75020830i64, // miko089
-        98765432i64, // testuser1
-        55566677i64, // testuser2
-        11122233i64, // testuser3
+        // miko089's GitHub user id for me to be able to see my submissions even in test run
+        75020830i64,
+        98765432i64,
+        55566677i64,
+        11122233i64,
     ];
 
-    // Create sample submissions for each user
     for (index, user_id) in test_user_ids.iter().enumerate() {
         println!("Creating submissions for user ID: {}", user_id);
 
-        // Create 5-10 submissions per user
         let num_submissions = if index == 0 {
             8
         } else {
@@ -37,7 +34,6 @@ async fn main() -> Result<()> {
                 _ => SubmissionStatus::Awaits,
             };
 
-            // Vary the created_at times
             let hours_ago = (i * 2 + rand::random::<usize>() % 24) as i64;
             let created_at = Utc::now() - chrono::Duration::hours(hours_ago);
             let updated_at = if matches!(status, SubmissionStatus::Completed) {
@@ -55,7 +51,6 @@ async fn main() -> Result<()> {
                 updated_at,
             };
 
-            // Insert into database
             let inserted_id = db_service.create_submission(submission).await?;
             println!("  Created submission {} with ID: {}", uuid, inserted_id);
 
@@ -68,75 +63,75 @@ async fn main() -> Result<()> {
 }
 
 async fn create_submission_files(uuid: &str, index: usize) -> Result<()> {
+    // TODO: use files instead of hard-coded samples
+
     let submissions_dir =
         env::var("SUBMISSIONS_FOLDER").unwrap_or_else(|_| "submission".to_string());
     let submission_path = format!("{}/{}", submissions_dir, uuid);
 
-    // Create directory
     tokio::fs::create_dir_all(&submission_path).await?;
 
-    // Create sample assembly code
     let sample_codes = vec![
-        r#"# Simple addition program
+        r#"
         .text
         .globl _start
 
     _start:
-        li x5, 10      # Load 10 into x5
-        li x6, 20      # Load 20 into x6
-        add x7, x5, x6 # Add x5 and x6, store in x7
-        ebreak         # End program"#,
-        r#"# Loop example
+        li x5, 10
+        li x6, 20
+        add x7, x5, x6
+        ebreak"#,
+        r#"
         .text
         .globl _start
 
     _start:
-        li x5, 0       # Initialize counter
-        li x6, 5       # Loop count
+        li x5, 0
+        li x6, 5
 
     loop:
-        addi x5, x5, 1 # Increment counter
-        bne x5, x6, loop # Continue if not equal
+        addi x5, x5, 1
+        bne x5, x6, loop
         ebreak"#,
-        r#"# Memory operations
+        r#"
         .text
         .globl _start
 
     _start:
-        la x10, data   # Load address of data
-        li x11, 42     # Value to store
-        sw x11, 0(x10) # Store value
-        lw x12, 0(x10) # Load value back
+        la x10, data
+        li x11, 42
+        sw x11, 0(x10)
+        lw x12, 0(x10)
         ebreak
 
     .data
     data: .word 0"#,
-        r#"# Fibonacci sequence
+        r#"
         .text
         .globl _start
 
     _start:
-        li x5, 0       # F(0)
-        li x6, 1       # F(1)
-        li x7, 10      # Count
+        li x5, 0
+        li x6, 1
+        li x7, 10
 
     fib_loop:
-        add x8, x5, x6 # Next Fibonacci number
-        mv x5, x6      # Shift
+        add x8, x5, x6
+        mv x5, x6
         mv x6, x8
-        addi x7, x7, -1 # Decrement counter
+        addi x7, x7, -1
         bnez x7, fib_loop
         ebreak"#,
-        r#"# Simple arithmetic
+        r#"
         .text
         .globl _start
 
     _start:
         li x5, 100
         li x6, 25
-        sub x7, x5, x6 # 100 - 25 = 75
+        sub x7, x5, x6
         li x8, 3
-        mul x9, x7, x8 # 75 * 3 = 225
+        mul x9, x7, x8
         ebreak"#,
     ];
 
@@ -156,6 +151,8 @@ async fn create_submission_files(uuid: &str, index: usize) -> Result<()> {
 }
 
 fn create_sample_simulation_result(assembly_code: &str, index: usize) -> String {
+    // TODO: use files instead of hard-coded samples
+
     let ulid = Ulid::new();
     let steps = if index % 3 == 0 {
         vec![

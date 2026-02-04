@@ -115,7 +115,6 @@ async fn submit_handler(
     headers: HeaderMap,
     multipart: Multipart,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    // Extract user information from request
     let (user_id, user_login, user_name) =
         match extract_user_from_request(&headers, &config.auth_state) {
             Ok(user_info) => user_info,
@@ -123,7 +122,7 @@ async fn submit_handler(
                 debug!("Authentication failed: {:#?}", e);
                 return (
                     e,
-                    Json(serde_json::json!({
+                    Json(json!({
                         "error": "Authentication required"
                     })),
                 );
@@ -163,10 +162,10 @@ async fn submit_handler(
         })
         .await;
     if let Err(e) = send_res {
-        error!("Failed to submit taks: {e}");
+        error!("Failed to submit task: {e}");
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({
+            Json(json!({
                 "error": format!("{e}"),
             })),
         );
@@ -184,18 +183,18 @@ async fn submit_handler(
 async fn submission_handler(
     State(config): State<Arc<Config>>,
     submission: Query<Submission>,
-) -> (axum::http::StatusCode, Json<serde_json::Value>) {
+) -> (StatusCode, Json<serde_json::Value>) {
     let submission = submission_file(&config.actor_config, submission.ulid);
     let content = match fs::read(submission).await {
         Ok(x) => x,
         Err(e) => {
-            if e.kind() == ErrorKind::NotFound {
-                return (StatusCode::NOT_FOUND, Json(serde_json::Value::Null));
+            return if e.kind() == ErrorKind::NotFound {
+                (StatusCode::NOT_FOUND, Json(serde_json::Value::Null))
             } else {
-                return (
+                (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(serde_json::Value::Null),
-                );
+                )
             }
         }
     };
@@ -214,7 +213,6 @@ async fn user_submissions_handler(
     State(config): State<Arc<Config>>,
     headers: HeaderMap,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    // Extract user information from request
     let (user_id, _user_login, _user_name) =
         match extract_user_from_request(&headers, &config.auth_state) {
             Ok(user_info) => user_info,
@@ -222,7 +220,7 @@ async fn user_submissions_handler(
                 debug!("Authentication failed: {:#?}", e);
                 return (
                     e,
-                    Json(serde_json::json!({
+                    Json(json!({
                         "error": "Authentication required"
                     })),
                 );
@@ -237,7 +235,7 @@ async fn user_submissions_handler(
     {
         Ok(submissions) => (
             StatusCode::OK,
-            Json(serde_json::json!({
+            Json(json!({
                 "submissions": submissions
             })),
         ),
@@ -245,7 +243,7 @@ async fn user_submissions_handler(
             error!("Failed to fetch user submissions: {:#?}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
+                Json(json!({
                     "error": "Failed to fetch submissions"
                 })),
             )
@@ -268,24 +266,12 @@ pub async fn run(root_span: tracing::Span, listener: TcpListener, cfg: Config) {
                 .route("/submit", post(submit_handler))
                 .route("/submission", get(submission_handler))
                 .route("/user-submissions", get(user_submissions_handler))
-                .nest(
-                    "/auth",
-                    Router::new()
-                        .route("/login", get(auth::login_handler))
-                        .route("/callback", get(auth::callback_handler))
-                        .route("/logout", get(auth::logout_handler))
-                        .route("/me", get(auth::me_handler)),
-                )
                 .layer(Extension(task_send))
                 .with_state(config.clone()),
         )
         .nest(
             "/auth",
-            Router::new()
-                .route("/login", get(auth::login_handler))
-                .route("/callback", get(auth::callback_handler))
-                .route("/logout", get(auth::logout_handler))
-                .route("/me", get(auth::me_handler))
+            auth::auth_routes()
                 .with_state(config.clone()),
         )
         .fallback_service(ServeDir::new("static"))

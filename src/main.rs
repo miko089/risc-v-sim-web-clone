@@ -17,8 +17,7 @@ async fn main() -> Result<()> {
     let ticks_max: u32 = std::env::var("TICKS_MAX")?.parse()?;
     let codesize_max: u32 = std::env::var("CODESIZE_MAX")?.parse()?;
     let auth_state = risc_v_sim_web::auth::create_auth_state()?;
-
-    // Initialize database
+    
     risc_v_sim_web::database::init_database().await?;
     let db_service = risc_v_sim_web::database::DatabaseService::new().await?;
 
@@ -39,11 +38,11 @@ async fn main() -> Result<()> {
                 submissions_folder: std::env::var("SUBMISSIONS_FOLDER")
                     .unwrap_or_else(|_| "submission".to_string())
                     .into(),
-                ticks_max: ticks_max,
-                codesize_max: codesize_max,
+                ticks_max,
+                codesize_max,
                 db_service: std::sync::Arc::new(db_service),
             },
-            auth_state: auth_state,
+            auth_state,
         },
     )
     .await;
