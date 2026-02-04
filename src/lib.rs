@@ -19,7 +19,7 @@ use serde_json::json;
 use std::io::ErrorKind;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
-use tokio::{fs, net::TcpListener};
+use tokio::{fs, join, net::TcpListener};
 use tower::ServiceBuilder;
 use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing::{Instrument, debug, error, info_span};
@@ -287,9 +287,8 @@ pub async fn run(root_span: tracing::Span, listener: TcpListener, cfg: Config) {
             }),
         );
 
-    tokio::spawn(submission_actor);
-
-    axum::serve(listener, router).await.unwrap();
+    let (res, _) = join!(axum::serve(listener, router), submission_actor);
+    res.unwrap();
 }
 
 #[cfg(test)]
