@@ -251,9 +251,7 @@ pub async fn auth_middleware(
                 &DecodingKey::from_secret(config.auth_state.jwt_secret.as_ref()),
                 &Validation::default(),
             ) {
-                Ok(_) => {
-                    next.run(request).await
-                }
+                Ok(_) => next.run(request).await,
                 Err(e) => {
                     tracing::warn!("Invalid JWT token: {:?}", e);
                     (
@@ -262,7 +260,7 @@ pub async fn auth_middleware(
                     )
                         .into_response()
                 }
-            }
+            };
         }
     }
 

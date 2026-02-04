@@ -53,7 +53,7 @@ impl DatabaseService {
             .context("Failed to connect to MongoDB")?;
 
         let db = Arc::new(client.database(&db_name));
-        
+
         let submissions_collection: Collection<SubmissionRecord> = db.collection("submissions");
         submissions_collection
             .create_index(

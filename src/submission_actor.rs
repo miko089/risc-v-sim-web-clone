@@ -96,7 +96,7 @@ async fn submission_task(config: Arc<Config>, task: SubmissionTask) {
         "Processing submission {} for user {} ({})",
         ulid_str, task.user_login, task.user_id
     );
-    
+
     if let Err(e) = config
         .db_service
         .create_submission_with_user(ulid_str.clone(), task.user_id)
@@ -111,7 +111,7 @@ async fn submission_task(config: Arc<Config>, task: SubmissionTask) {
         error!("can't create submission_dir: {e:#}");
         return;
     }
-    
+
     if let Err(e) = config
         .db_service
         .update_submission_status(&ulid_str, SubmissionStatus::InProgress)

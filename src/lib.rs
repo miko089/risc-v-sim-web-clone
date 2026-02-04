@@ -195,7 +195,7 @@ async fn submission_handler(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(serde_json::Value::Null),
                 )
-            }
+            };
         }
     };
     let json_content = Json::from_bytes(&content);
@@ -269,11 +269,7 @@ pub async fn run(root_span: tracing::Span, listener: TcpListener, cfg: Config) {
                 .layer(Extension(task_send))
                 .with_state(config.clone()),
         )
-        .nest(
-            "/auth",
-            auth::auth_routes()
-                .with_state(config.clone()),
-        )
+        .nest("/auth", auth::auth_routes().with_state(config.clone()))
         .fallback_service(ServeDir::new("static"))
         .layer(ServiceBuilder::new().layer(tower_http::cors::CorsLayer::permissive()))
         .layer(middleware::from_fn_with_state(
