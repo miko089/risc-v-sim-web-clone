@@ -6,9 +6,6 @@ use mongodb::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::OnceCell;
-
-static DB: OnceCell<Arc<Database>> = OnceCell::const_new();
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubmissionRecord {
@@ -154,19 +151,4 @@ impl DatabaseService {
 
         self.create_submission(submission).await
     }
-}
-
-pub async fn init_database() -> Result<()> {
-    if DB.get().is_some() {
-        return Ok(());
-    }
-
-    let db_service = DatabaseService::new().await?;
-    DB.set(db_service.db)
-        .map_err(|_| anyhow::anyhow!("Failed to initialize database"))?;
-    Ok(())
-}
-
-pub fn get_database() -> Option<Arc<Database>> {
-    DB.get().cloned()
 }
