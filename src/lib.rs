@@ -25,6 +25,7 @@ use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing::{Instrument, debug, error, info_span};
 use ulid::Ulid;
 
+use crate::database::DatabaseService;
 use auth::{AuthConfig, Claims, auth_middleware};
 use submission_actor::{
     Config as ActorConfig, SubmissionTask, run_submission_actor, submission_file,
@@ -32,7 +33,8 @@ use submission_actor::{
 
 pub struct Config {
     pub actor_config: ActorConfig,
-    pub auth_state: AuthConfig,
+    pub auth_config: AuthConfig,
+    pub db_service: Arc<DatabaseService>,
 }
 
 #[derive(Deserialize)]
@@ -116,7 +118,7 @@ async fn submit_handler(
     multipart: Multipart,
 ) -> (StatusCode, Json<serde_json::Value>) {
     let (user_id, user_login, _user_name) =
-        match extract_user_from_request(&headers, &config.auth_state) {
+        match extract_user_from_request(&headers, &config.auth_config) {
             Ok(user_info) => user_info,
             Err(e) => {
                 debug!("Authentication failed: {:#?}", e);
@@ -212,7 +214,7 @@ async fn user_submissions_handler(
     headers: HeaderMap,
 ) -> (StatusCode, Json<serde_json::Value>) {
     let (user_id, _user_login, _user_name) =
-        match extract_user_from_request(&headers, &config.auth_state) {
+        match extract_user_from_request(&headers, &config.auth_config) {
             Ok(user_info) => user_info,
             Err(e) => {
                 debug!("Authentication failed: {:#?}", e);
@@ -225,12 +227,7 @@ async fn user_submissions_handler(
             }
         };
 
-    match config
-        .actor_config
-        .db_service
-        .get_user_submissions(user_id)
-        .await
-    {
+    match config.db_service.get_user_submissions(user_id).await {
         Ok(submissions) => (
             StatusCode::OK,
             Json(json!({
@@ -253,8 +250,12 @@ pub async fn run(root_span: tracing::Span, listener: TcpListener, cfg: Config) {
     let (task_send, task_recv) = tokio::sync::mpsc::channel::<SubmissionTask>(100);
     let config = Arc::new(cfg);
 
-    let submission_actor = run_submission_actor(Arc::new(config.actor_config.clone()), task_recv)
-        .instrument(info_span!("submission_actor"));
+    let submission_actor = run_submission_actor(
+        Arc::new(config.actor_config.clone()),
+        config.db_service.clone(),
+        task_recv,
+    )
+    .instrument(info_span!("submission_actor"));
 
     let router = Router::new()
         .nest(

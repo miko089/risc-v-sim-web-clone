@@ -75,9 +75,9 @@ pub async fn default_config(test_name: &str) -> risc_v_sim_web::Config {
             submissions_folder: format!("submissions-{test_name}").into(),
             ticks_max: 15,
             codesize_max: 256,
-            db_service: std::sync::Arc::new(db_service),
         },
-        auth_state,
+        auth_config: auth_state,
+        db_service: std::sync::Arc::new(db_service),
     }
 }
 

@@ -35,6 +35,7 @@ impl From<SubmissionStatus> for Bson {
     }
 }
 
+#[derive(Clone)]
 pub struct DatabaseService {
     db: Arc<Database>,
 }

@@ -87,7 +87,7 @@ pub async fn login_handler(
     State(config): State<Arc<crate::Config>>,
 ) -> Result<Redirect, StatusCode> {
     let (auth_url, _csrf_token) = config
-        .auth_state
+        .auth_config
         .oauth_client
         .authorize_url(CsrfToken::new_random)
         .add_scope(Scope::new("user:email".to_string()))
@@ -120,7 +120,7 @@ pub async fn callback_handler(
     let code = AuthorizationCode::new(query.code.clone());
 
     let token_response = config
-        .auth_state
+        .auth_config
         .oauth_client
         .exchange_code(code)
         .request_async(async_http_client)
@@ -169,7 +169,7 @@ pub async fn callback_handler(
     let token = encode(
         &Header::default(),
         &claims,
-        &EncodingKey::from_secret(config.auth_state.jwt_secret.as_ref()),
+        &EncodingKey::from_secret(config.auth_config.jwt_secret.as_ref()),
     )
     .map_err(|e| {
         tracing::error!("Failed to create JWT token: {:?}", e);
@@ -213,7 +213,7 @@ pub async fn me_handler(
 
     let token_data = decode::<Claims>(
         &token,
-        &DecodingKey::from_secret(config.auth_state.jwt_secret.as_ref()),
+        &DecodingKey::from_secret(config.auth_config.jwt_secret.as_ref()),
         &Validation::default(),
     )
     .map_err(|_| StatusCode::UNAUTHORIZED)?;
@@ -259,7 +259,7 @@ pub async fn auth_middleware(
         {
             return match decode::<Claims>(
                 token,
-                &DecodingKey::from_secret(config.auth_state.jwt_secret.as_ref()),
+                &DecodingKey::from_secret(config.auth_config.jwt_secret.as_ref()),
                 &Validation::default(),
             ) {
                 Ok(_) => next.run(request).await,

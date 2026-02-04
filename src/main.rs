@@ -1,5 +1,6 @@
 use anyhow::Result;
 use std::net::{Ipv4Addr, SocketAddrV4};
+use std::sync::Arc;
 use tracing::{Level, info};
 
 #[tokio::main]
@@ -39,9 +40,9 @@ async fn main() -> Result<()> {
                     .into(),
                 ticks_max,
                 codesize_max,
-                db_service: std::sync::Arc::new(db_service),
             },
-            auth_state,
+            auth_config: auth_state,
+            db_service: Arc::new(db_service),
         },
     )
     .await;

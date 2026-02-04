@@ -32,15 +32,18 @@ pub struct Config {
     pub submissions_folder: PathBuf,
     pub ticks_max: u32,
     pub codesize_max: u32,
-    pub db_service: Arc<DatabaseService>,
 }
 
-pub async fn run_submission_actor(config: Arc<Config>, mut tasks: Receiver<SubmissionTask>) {
+pub async fn run_submission_actor(
+    config: Arc<Config>,
+    db_service: Arc<DatabaseService>,
+    mut tasks: Receiver<SubmissionTask>,
+) {
     while let Some(task) = tasks.recv().await {
         let ulid = task.ulid;
         debug!("Received task {ulid}");
         tokio::spawn(
-            submission_task(config.clone(), task)
+            submission_task(config.clone(), db_service.clone(), task)
                 .instrument(info_span!("submission_task", ulid=%ulid)),
         );
     }
@@ -88,12 +91,15 @@ async fn simulate(
     Ok(json)
 }
 
-async fn submission_task(config: Arc<Config>, task: SubmissionTask) {
+async fn submission_task(
+    config: Arc<Config>,
+    db_service: Arc<DatabaseService>,
+    task: SubmissionTask,
+) {
     let ulid_str = task.ulid.to_string();
     info!("Processing submission {}", ulid_str);
 
-    if let Err(e) = config
-        .db_service
+    if let Err(e) = db_service
         .create_submission_with_user(ulid_str.clone(), task.user_id)
         .await
     {
@@ -107,8 +113,7 @@ async fn submission_task(config: Arc<Config>, task: SubmissionTask) {
         return;
     }
 
-    if let Err(e) = config
-        .db_service
+    if let Err(e) = db_service
         .update_submission_status(&ulid_str, SubmissionStatus::InProgress)
         .await
     {
@@ -145,8 +150,7 @@ async fn submission_task(config: Arc<Config>, task: SubmissionTask) {
         error!("failed to write submission task result: {write_err:#}");
     }
 
-    if let Err(e) = config
-        .db_service
+    if let Err(e) = db_service
         .update_submission_status(&ulid_str, final_status)
         .await
     {
@@ -256,10 +260,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_path_utils() {
-        let db_service = DatabaseService::new()
-            .await
-            .expect("Failed to create test database service");
-
         let config = Config {
             as_binary: "dummy".into(),
             ld_binary: "dummy".into(),
@@ -267,7 +267,6 @@ mod tests {
             submissions_folder: "submissions".into(),
             ticks_max: u32::MAX,
             codesize_max: u32::MAX,
-            db_service: Arc::new(db_service),
         };
         for _ in 0..10 {
             let ulid = Ulid::new();
