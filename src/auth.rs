@@ -215,7 +215,7 @@ pub async fn me_handler(
 
 pub fn auth_routes() -> Router<Arc<crate::Config>> {
     Router::new()
-        .route("/login", get(login_handler)) // get because it doesn't do anything, just redirects to "actual" login page
+        .route("/login", post(login_handler))
         .route("/callback", get(callback_handler))
         .route("/logout", post(logout_handler))
         .route("/me", get(me_handler))

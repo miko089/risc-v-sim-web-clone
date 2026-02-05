@@ -1255,7 +1255,7 @@ class AuthManager {
     }
 
     login() {
-        window.location.href = '/auth/login';
+        // window.location.href = '/auth/login';
     }
 
     async logout() {
