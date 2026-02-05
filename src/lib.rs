@@ -7,11 +7,12 @@ use axum::{
     Extension, Router,
     body::Body,
     extract::{Multipart, Query, State, multipart::Field},
-    http::{HeaderMap, Request, StatusCode},
+    http::{Request, StatusCode},
     middleware::{self},
     response::Json,
     routing::{get, post},
 };
+use axum_extra::extract::CookieJar;
 use bytes;
 use jsonwebtoken::{DecodingKey, Validation, decode};
 use serde::Deserialize;
@@ -47,30 +48,22 @@ pub async fn health_handler() -> &'static str {
 }
 
 fn extract_user_from_request(
-    headers: &HeaderMap,
+    jar: CookieJar,
     auth_state: &AuthConfig,
 ) -> Result<(i64, String, Option<String>), StatusCode> {
-    let auth_header = headers
-        .get("cookie")
-        .and_then(|h| h.to_str().ok())
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    let token = auth_header
-        .split("jwt=")
-        .nth(1)
-        .and_then(|s| s.split(';').next())
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    let token_data = decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(auth_state.jwt_secret.as_ref()),
-        &Validation::default(),
-    )
-    .map_err(|_| StatusCode::UNAUTHORIZED)?;
-
-    let claims = token_data.claims;
-    let user_id = claims.sub.parse().map_err(|_| StatusCode::UNAUTHORIZED)?;
-    Ok((user_id, claims.login, claims.name))
+    if let Some(token) = jar.get("jwt") {
+        let token_data = decode::<Claims>(
+            token.value(),
+            &DecodingKey::from_secret(auth_state.jwt_secret.as_ref()),
+            &Validation::default(),
+        )
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+        let claims = token_data.claims;
+        let user_id = claims.sub.parse().map_err(|_| StatusCode::UNAUTHORIZED)?;
+        Ok((user_id, claims.login, claims.name))
+    } else {
+        Err(StatusCode::UNAUTHORIZED)
+    }
 }
 
 pub async fn parse_submit_inputs(
@@ -114,11 +107,11 @@ async fn ticks_from_field(field: Field<'_>) -> Result<u32> {
 async fn submit_handler(
     State(config): State<Arc<Config>>,
     Extension(task_send): Extension<Sender<SubmissionTask>>,
-    headers: HeaderMap,
+    jar: CookieJar,
     multipart: Multipart,
 ) -> (StatusCode, Json<serde_json::Value>) {
     let (user_id, user_login, _user_name) =
-        match extract_user_from_request(&headers, &config.auth_config) {
+        match extract_user_from_request(jar, &config.auth_config) {
             Ok(user_info) => user_info,
             Err(e) => {
                 debug!("Authentication failed: {:#?}", e);
@@ -211,10 +204,10 @@ async fn submission_handler(
 
 async fn user_submissions_handler(
     State(config): State<Arc<Config>>,
-    headers: HeaderMap,
+    jar: CookieJar,
 ) -> (StatusCode, Json<serde_json::Value>) {
     let (user_id, _user_login, _user_name) =
-        match extract_user_from_request(&headers, &config.auth_config) {
+        match extract_user_from_request(jar, &config.auth_config) {
             Ok(user_info) => user_info,
             Err(e) => {
                 debug!("Authentication failed: {:#?}", e);

@@ -2,11 +2,12 @@ use anyhow::{Context, Result, anyhow};
 use axum::{
     Router,
     extract::{Query, Request, State},
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     middleware::Next,
     response::{IntoResponse, Json, Redirect, Response},
     routing::{get, post},
 };
+use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::Cookie;
 use chrono::{Duration, Utc};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
@@ -97,20 +98,20 @@ pub async fn login_handler(
     Ok(Redirect::to(auth_url.as_str()))
 }
 
-pub async fn logout_handler(_config: State<Arc<crate::Config>>) -> Response {
-    let cookie = "jwt=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax".to_string();
-    Response::builder()
-        .status(StatusCode::FOUND)
-        .header("Location", "/")
-        .header("Set-Cookie", cookie)
-        .body(axum::body::Body::empty())
-        .unwrap()
+pub async fn logout_handler(_config: State<Arc<crate::Config>>) -> (CookieJar, Redirect) {
+    let mut cookie = Cookie::new("jwt", "");
+    cookie.set_path("/");
+    cookie.make_removal();
+
+    let jar = CookieJar::new();
+    (jar.add(cookie), Redirect::to("/"))
 }
 
 pub async fn callback_handler(
     State(config): State<Arc<crate::Config>>,
     Query(query): Query<AuthQuery>,
-) -> Result<Response, StatusCode> {
+    jar: CookieJar,
+) -> Result<(CookieJar, Redirect), StatusCode> {
     tracing::info!(
         "Received OAuth callback with code length: {} and state: {}",
         query.code.len(),
@@ -176,57 +177,40 @@ pub async fn callback_handler(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let cookie = format!(
-        "jwt={}; Path=/; Max-Age=86400; HttpOnly; SameSite=Lax",
-        token
-    );
+    let mut cookie = Cookie::new("jwt", token);
+    cookie.set_path("/");
+    cookie.set_max_age(Some(time::Duration::hours(24 * 7)));
+    cookie.set_http_only(true);
 
     tracing::info!("Redirecting user to / with auth cookie");
 
-    Ok(Response::builder()
-        .status(StatusCode::FOUND)
-        .header("Location", "/")
-        .header("Set-Cookie", cookie)
-        .body(axum::body::Body::empty())
-        .unwrap())
+    Ok((jar.add(cookie), Redirect::to("/")))
 }
 
 pub async fn me_handler(
     State(config): State<Arc<crate::Config>>,
-    headers: HeaderMap,
+    jar: CookieJar,
 ) -> Result<Json<AuthResponse>, StatusCode> {
-    let cookie = headers
-        .get("cookie")
-        .and_then(|h| h.to_str().ok())
-        .ok_or(StatusCode::UNAUTHORIZED)?;
+    if let Some(token) = jar.get("jwt") {
+        let token_data = decode::<Claims>(
+            &token.value(),
+            &DecodingKey::from_secret(config.auth_config.jwt_secret.as_ref()),
+            &Validation::default(),
+        )
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
 
-    let cookie_value = Cookie::parse(cookie.to_owned()).map_err(|_e| StatusCode::UNAUTHORIZED)?;
+        let claims = token_data.claims;
+        let user = User {
+            id: claims.sub.parse().unwrap_or(0),
+            login: claims.login,
+            name: claims.name,
+            avatar_url: None,
+        };
 
-    let token = {
-        let (name, value) = cookie_value.name_value();
-        if name == "jwt" {
-            value
-        } else {
-            return Err(StatusCode::UNAUTHORIZED);
-        }
-    };
-
-    let token_data = decode::<Claims>(
-        &token,
-        &DecodingKey::from_secret(config.auth_config.jwt_secret.as_ref()),
-        &Validation::default(),
-    )
-    .map_err(|_| StatusCode::UNAUTHORIZED)?;
-
-    let claims = token_data.claims;
-    let user = User {
-        id: claims.sub.parse().unwrap_or(0),
-        login: claims.login,
-        name: claims.name,
-        avatar_url: None,
-    };
-
-    Ok(Json(AuthResponse { user }))
+        Ok(Json(AuthResponse { user }))
+    } else {
+        Err(StatusCode::UNAUTHORIZED)
+    }
 }
 
 pub fn auth_routes() -> Router<Arc<crate::Config>> {
