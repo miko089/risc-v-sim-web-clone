@@ -26,21 +26,6 @@ jobs:
       - run: cargo check --locked
   unit-tests:
     runs-on: ubuntu-24.04
-    services:
-      mongodb:
-        image: mongo:7
-        env:
-          MONGO_INITDB_DATABASE: riscv_sim_test
-        ports:
-          - 27017:27017
-        options: >-
-          --health-cmd "echo 'db.runCommand(\"ping\").ok' | mongosh localhost:27017/test --quiet"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    env:
-      MONGODB_URI: mongodb://localhost:27017
-      MONGODB_DB: riscv_sim_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/cache@v4
@@ -56,38 +41,6 @@ jobs:
           restore-keys: ci-unit-cargo-
       - run: cargo test -q --lib --bins --locked
       - run: cargo test --doc --locked
-  integration-tests:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: 'true'
-      - name: Capture traces
-        run: |
-          cd risc-v-sim
-          cargo build --locked
-          cd ..
-          cp risc-v-sim/target/debug/risc-v-sim ./riscv-samples
-          docker run --rm --mount type=bind,src=./riscv-samples,dst=/ws krinkin/rv64-toolchain:latest make capture
-          mkdir -p traces
-          cp riscv-samples/traces/*.json traces/
-      - name: Build and start services with docker-compose
-        run: |
-          docker compose -f docker-compose.ci.yml build
-          docker compose -f docker-compose.ci.yml up -d
-      - name: Wait for services to be ready
-        run: |
-          sleep 10
-          curl --retry 10 --retry-delay 5 --retry-connrefused http://localhost:3000/api/health
-      - name: Run integration tests
-        run: |
-          docker compose -f docker-compose.ci.yml exec -T riscv-sim-web cargo test --test "*" --locked -- --show-output
-      - name: Check logs on failure
-        if: failure()
-        run: docker compose -f docker-compose.ci.yml logs
-      - name: Cleanup
-        if: always()
-        run: docker compose -f docker-compose.ci.yml down -v
   cargo-fmt:
     runs-on: ubuntu-24.04
     steps:
@@ -111,4 +64,3 @@ jobs:
           key: ci-doc-check-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ci-doc-check-cargo-
       - run: cargo doc --no-deps --document-private-items
-

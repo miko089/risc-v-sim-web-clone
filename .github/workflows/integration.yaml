@@ -64,20 +64,12 @@ jobs:
         with:
           name: traces
           path: traces
-      - name: Build and start services with docker-compose
+      - name: Build dockerfile
         run: |
-          docker compose -f docker-compose.ci.yml build
-          docker compose -f docker-compose.ci.yml up -d
-      - name: Wait for services to be ready
-        run: |
-          sleep 10
-          curl --retry 10 --retry-delay 5 --retry-connrefused http://localhost:3000/api/health
+          docker build -t meow .
       - name: Run integration tests
         run: |
-          docker compose -f docker-compose.ci.yml exec -T riscv-sim-web cargo test --test "*" --locked -- --show-output
+          docker run --entrypoint "" --network=host meow cargo test --test "*" --locked -- --show-output
       - name: Check logs on failure
         if: failure()
-        run: docker compose -f docker-compose.ci.yml logs
-      - name: Cleanup
-        if: always()
-        run: docker compose -f docker-compose.ci.yml down -v
+        run: docker logs $(docker ps -a -q --filter "ancestor=meow" -n 1)

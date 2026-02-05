@@ -45,7 +45,7 @@ pub async fn spawn_server(span: &Span, cfg: risc_v_sim_web::Config) -> (u16, Joi
 async fn make_listener() -> (u16, TcpListener) {
     // NOTE: we specifically create a listener on the same thread and make the
     //       caller wait. This is because we want to make sure the server properly
-    //       reserves the port. Otherwise the caller's HTTP requests will race
+    //       reserves the port. Otherwise, the caller's HTTP requests will race
     //       and get a "connection refused" response.
     let address = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
     let listener = TcpListener::bind(address).await.unwrap();
