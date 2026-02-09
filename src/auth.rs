@@ -223,40 +223,36 @@ pub fn auth_routes() -> Router<Arc<crate::Config>> {
 
 pub async fn auth_middleware(
     State(config): State<Arc<crate::Config>>,
-    request: Request<axum::body::Body>,
+    cookie_jar: CookieJar,
+    mut request: Request<axum::body::Body>,
     next: Next,
 ) -> Response {
     let path = request.uri().path();
 
-    if path != "/submit" && path != "/submission" {
+    if path != "/api/submit" && path != "/api/submission" && path != "/api/user-submissions" {
         return next.run(request).await;
     }
 
-    let headers = request.headers();
-    let auth_header = headers.get("cookie").and_then(|h| h.to_str().ok());
-
-    if let Some(auth_header) = auth_header {
-        if let Some(token) = auth_header
-            .split("jwt=")
-            .nth(1)
-            .and_then(|s| s.split(';').next())
-        {
-            return match decode::<Claims>(
-                token,
-                &DecodingKey::from_secret(config.auth_config.jwt_secret.as_ref()),
-                &Validation::default(),
-            ) {
-                Ok(_) => next.run(request).await,
-                Err(e) => {
-                    tracing::warn!("Invalid JWT token: {:?}", e);
-                    (
-                        StatusCode::UNAUTHORIZED,
-                        Json(serde_json::json!({"error": "Invalid authorization token"})),
-                    )
-                        .into_response()
-                }
-            };
-        }
+    let token = cookie_jar.get("jwt");
+    if let Some(token) = token {
+        return match decode::<Claims>(
+            token.value(),
+            &DecodingKey::from_secret(config.auth_config.jwt_secret.as_ref()),
+            &Validation::default(),
+        ) {
+            Ok(token_data) => {
+                request.extensions_mut().insert(token_data.claims);
+                next.run(request).await
+            }
+            Err(e) => {
+                tracing::warn!("Invalid JWT token: {:?}", e);
+                (
+                    StatusCode::UNAUTHORIZED,
+                    Json(serde_json::json!({"error": "Invalid authorization token"})),
+                )
+                    .into_response()
+            }
+        };
     }
 
     tracing::warn!("Unauthorized access attempt to {}", path);

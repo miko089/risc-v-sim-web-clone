@@ -12,9 +12,7 @@ use axum::{
     response::Json,
     routing::{get, post},
 };
-use axum_extra::extract::CookieJar;
 use bytes;
-use jsonwebtoken::{DecodingKey, Validation, decode};
 use serde::Deserialize;
 use serde_json::json;
 use std::io::ErrorKind;
@@ -45,25 +43,6 @@ pub struct Submission {
 
 pub async fn health_handler() -> &'static str {
     "Ok"
-}
-
-fn extract_user_from_request(
-    jar: CookieJar,
-    auth_state: &AuthConfig,
-) -> Result<(i64, String, Option<String>), StatusCode> {
-    if let Some(token) = jar.get("jwt") {
-        let token_data = decode::<Claims>(
-            token.value(),
-            &DecodingKey::from_secret(auth_state.jwt_secret.as_ref()),
-            &Validation::default(),
-        )
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
-        let claims = token_data.claims;
-        let user_id = claims.sub.parse().map_err(|_| StatusCode::UNAUTHORIZED)?;
-        Ok((user_id, claims.login, claims.name))
-    } else {
-        Err(StatusCode::UNAUTHORIZED)
-    }
 }
 
 pub async fn parse_submit_inputs(
@@ -107,23 +86,11 @@ async fn ticks_from_field(field: Field<'_>) -> Result<u32> {
 async fn submit_handler(
     State(config): State<Arc<Config>>,
     Extension(task_send): Extension<Sender<SubmissionTask>>,
-    jar: CookieJar,
+    Extension(claim): Extension<Claims>,
     multipart: Multipart,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let (user_id, user_login, _user_name) =
-        match extract_user_from_request(jar, &config.auth_config) {
-            Ok(user_info) => user_info,
-            Err(e) => {
-                debug!("Authentication failed: {:#?}", e);
-                return (
-                    e,
-                    Json(json!({
-                        "error": "Authentication required"
-                    })),
-                );
-            }
-        };
-
+    let user_id = claim.sub.parse().unwrap();
+    let user_login = claim.login;
     let (ticks, source_code) = match parse_submit_inputs(multipart, config.as_ref())
         .await
         .context("parse input")
@@ -204,22 +171,9 @@ async fn submission_handler(
 
 async fn user_submissions_handler(
     State(config): State<Arc<Config>>,
-    jar: CookieJar,
+    Extension(claim): Extension<Claims>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let (user_id, _user_login, _user_name) =
-        match extract_user_from_request(jar, &config.auth_config) {
-            Ok(user_info) => user_info,
-            Err(e) => {
-                debug!("Authentication failed: {:#?}", e);
-                return (
-                    e,
-                    Json(json!({
-                        "error": "Authentication required"
-                    })),
-                );
-            }
-        };
-
+    let user_id = claim.sub.parse().unwrap();
     match config.db_service.get_user_submissions(user_id).await {
         Ok(submissions) => (
             StatusCode::OK,
