@@ -37,6 +37,6 @@ docker-compose up -d
 The application will be available at http://localhost:3000
 
 ## How to use
-http://localhost:3000/api/health should return `Ok`
+http://localhost:3000/health should return `Ok`.
 
 http://localhost:3000/api/submit with POST request and `ticks=<ticks>` (text/plain) and `file=<program.s>` (application/octet-stream) should return json if all is ok

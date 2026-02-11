@@ -212,7 +212,6 @@ pub async fn run(root_span: tracing::Span, listener: TcpListener, cfg: Config) {
         .nest(
             "/api",
             Router::new()
-                .route("/health", get(health_handler))
                 .route("/submit", post(submit_handler))
                 .route("/submission", get(submission_handler))
                 .route("/user-submissions", get(user_submissions_handler))
@@ -225,6 +224,7 @@ pub async fn run(root_span: tracing::Span, listener: TcpListener, cfg: Config) {
                 )),
         )
         .nest("/auth", auth::auth_routes().with_state(config.clone()))
+        .route("/health", get(health_handler))
         .fallback_service(ServeDir::new("static"))
         .layer(ServiceBuilder::new().layer(tower_http::cors::CorsLayer::permissive()))
         .layer(
