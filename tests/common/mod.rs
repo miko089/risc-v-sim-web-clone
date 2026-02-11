@@ -1,7 +1,7 @@
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::path::Path;
 
-use chrono::{Duration, Utc};
+use time::{Duration, UtcDateTime};
 use jsonwebtoken::{EncodingKey, Header, encode};
 use reqwest::{Client, Response, Url};
 use tokio::{net::TcpListener, task::JoinHandle};
@@ -95,7 +95,7 @@ pub fn generate_test_token(user_id: &str, login: &str, jwt_secret: &str) -> Stri
         sub: user_id.to_string(),
         login: login.to_string(),
         name: Some("Test User".to_string()),
-        exp: (Utc::now() + Duration::hours(24)).timestamp(),
+        exp: (UtcDateTime::now() + Duration::hours(24)).unix_timestamp(),
     };
 
     encode(

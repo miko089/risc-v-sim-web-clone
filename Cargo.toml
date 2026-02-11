@@ -31,11 +31,10 @@ serde = { version = "1.0.228", features = ["derive"] }
 jsonwebtoken = "9.3"
 oauth2 = "4.4"
 reqwest = { version = "0.12", features = ["json"] }
-chrono = { version = "0.4", features = ["serde"] }
-mongodb = "3.1"
+mongodb = { version = "3.5.1", features = ["bson-3"] }
 rand = "0.8"
 futures-util = "0.3"
-time = "0.3.47"
+time = { version = "0.3.47", features = ["serde"] }
 
 [dev-dependencies]
 reqwest = { version = "0.12.24", features = ["multipart", "stream"] }

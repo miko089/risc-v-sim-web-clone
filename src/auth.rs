@@ -9,7 +9,7 @@ use axum::{
 };
 use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::Cookie;
-use chrono::{Duration, Utc};
+use time::{UtcDateTime, Duration};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use oauth2::{
     AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, Scope, TokenResponse, TokenUrl,
@@ -164,7 +164,7 @@ pub async fn callback_handler(
         sub: user_id.clone(),
         login: login.clone(),
         name,
-        exp: (Utc::now() + Duration::hours(24 * 7)).timestamp(),
+        exp: (UtcDateTime::now() + Duration::hours(24 * 7)).unix_timestamp(),
     };
 
     let token = encode(

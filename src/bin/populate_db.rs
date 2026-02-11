@@ -1,9 +1,10 @@
 use anyhow::Result;
-use chrono::Utc;
 use risc_v_sim_web::database::{DatabaseService, SubmissionRecord, SubmissionStatus};
 use serde_json;
 use std::env;
+use mongodb::bson;
 use ulid::Ulid;
+use bson::DateTime;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -35,9 +36,11 @@ async fn main() -> Result<()> {
             };
 
             let hours_ago = (i * 2 + rand::random::<usize>() % 24) as i64;
-            let created_at = Utc::now() - chrono::Duration::hours(hours_ago);
+            let now_millis = DateTime::now().timestamp_millis();
+            let created_at = DateTime::from_millis(now_millis - hours_ago * 3_600_000);
             let updated_at = if matches!(status, SubmissionStatus::Completed) {
-                created_at + chrono::Duration::minutes(rand::random::<i64>().abs() % 120)
+                let minutes_offset = (rand::random::<i64>().abs() % 120) * 60_000;
+                DateTime::from_millis(created_at.timestamp_millis() + minutes_offset)
             } else {
                 created_at
             };

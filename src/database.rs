@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use futures_util::stream::TryStreamExt;
 use mongodb::{
     Client, Collection, Database, IndexModel,
-    bson::{Bson, doc, oid::ObjectId},
+    bson::{Bson, doc, oid::ObjectId, DateTime},
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -14,8 +14,8 @@ pub struct SubmissionRecord {
     pub uuid: String,
     pub user_id: i64,
     pub status: SubmissionStatus,
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub created_at: DateTime,
+    pub updated_at: DateTime,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -111,7 +111,7 @@ impl DatabaseService {
         let update = doc! {
             "$set": {
                 "status": Bson::from(status),
-                "updated_at": Bson::String(chrono::Utc::now().to_rfc3339())
+                "updated_at": DateTime::now(),
             }
         };
 
@@ -140,7 +140,7 @@ impl DatabaseService {
         uuid: String,
         user_id: i64,
     ) -> Result<ObjectId> {
-        let now = chrono::Utc::now();
+        let now = DateTime::now();
         let submission = SubmissionRecord {
             id: None,
             uuid,

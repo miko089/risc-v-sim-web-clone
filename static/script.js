@@ -349,17 +349,17 @@ class SubmissionsPage {
             const response = await fetch('/api/user-submissions');
             if (response.ok) {
                 const data = await response.json();
-                this.submissions = data.submissions.map(sub => ({
-                    id: sub.uuid,
-                    timestamp: sub.created_at,
-                    ticks: 0, // We'll get this from file system when needed
-                    code: '', // We'll get this from file system when needed
-                    result: { steps: [] },
-                    status: sub.status.toLowerCase().replace('_', ''),
-                    user_id: sub.user_id
-                }));
+                this.submissions = data.submissions.map(sub => (
+                    {
+                        id: sub.uuid,
+                        timestamp: new Date(+sub.created_at.$date.$numberLong),
+                        ticks: 0, // We'll get this from file system when needed
+                        code: '', // We'll get this from file system when needed
+                        result: { steps: [] },
+                        status: sub.status.toLowerCase().replace('_', ''),
+                        user_id: sub.user_id
+                    }));
             } else {
-                // Show error if API fails
                 this.showError('Failed to load submissions from server');
                 return;
             }

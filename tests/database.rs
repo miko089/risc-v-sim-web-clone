@@ -1,4 +1,4 @@
-use chrono::Utc;
+use mongodb::bson::DateTime;
 use risc_v_sim_web::database::{DatabaseService, SubmissionRecord, SubmissionStatus};
 
 #[tokio::test]
@@ -13,8 +13,8 @@ async fn database_create_and_retrieve_submission() {
         uuid: test_uuid.clone(),
         user_id: test_user_id,
         status: SubmissionStatus::Awaits,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
+        created_at: DateTime::now(),
+        updated_at: DateTime::now(),
     };
 
     let created_id = db_service
