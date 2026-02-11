@@ -1,10 +1,10 @@
 use anyhow::Result;
+use bson::DateTime;
+use mongodb::bson;
 use risc_v_sim_web::database::{DatabaseService, SubmissionRecord, SubmissionStatus};
 use serde_json;
 use std::env;
-use mongodb::bson;
 use ulid::Ulid;
-use bson::DateTime;
 
 #[tokio::main]
 async fn main() -> Result<()> {

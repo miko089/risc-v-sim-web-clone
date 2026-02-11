@@ -9,7 +9,6 @@ use axum::{
 };
 use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::Cookie;
-use time::{UtcDateTime, Duration};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use oauth2::{
     AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, Scope, TokenResponse, TokenUrl,
@@ -17,6 +16,7 @@ use oauth2::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use time::{Duration, UtcDateTime};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {

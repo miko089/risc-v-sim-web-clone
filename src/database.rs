@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use futures_util::stream::TryStreamExt;
 use mongodb::{
     Client, Collection, Database, IndexModel,
-    bson::{Bson, doc, oid::ObjectId, DateTime},
+    bson::{Bson, DateTime, doc, oid::ObjectId},
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
