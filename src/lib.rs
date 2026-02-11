@@ -24,8 +24,9 @@ use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing::{Instrument, debug, error, info_span};
 use ulid::Ulid;
 
+use crate::auth::User;
 use crate::database::DatabaseService;
-use auth::{AuthConfig, Claims, auth_middleware};
+use auth::{AuthConfig, auth_middleware};
 use submission_actor::{
     Config as ActorConfig, SubmissionTask, run_submission_actor, submission_file,
 };
@@ -86,11 +87,11 @@ async fn ticks_from_field(field: Field<'_>) -> Result<u32> {
 async fn submit_handler(
     State(config): State<Arc<Config>>,
     Extension(task_send): Extension<Sender<SubmissionTask>>,
-    Extension(claim): Extension<Claims>,
+    Extension(user): Extension<User>,
     multipart: Multipart,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let user_id = claim.sub.parse().unwrap();
-    let user_login = claim.login;
+    let user_id = user.id;
+    let user_login = user.login;
     let (ticks, source_code) = match parse_submit_inputs(multipart, config.as_ref())
         .await
         .context("parse input")
@@ -171,10 +172,9 @@ async fn submission_handler(
 
 async fn user_submissions_handler(
     State(config): State<Arc<Config>>,
-    Extension(claim): Extension<Claims>,
+    Extension(user): Extension<User>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let user_id = claim.sub.parse().unwrap();
-    match config.db_service.get_user_submissions(user_id).await {
+    match config.db_service.get_user_submissions(user.id).await {
         Ok(submissions) => (
             StatusCode::OK,
             Json(json!({
@@ -213,15 +213,15 @@ pub async fn run(root_span: tracing::Span, listener: TcpListener, cfg: Config) {
                 .route("/submission", get(submission_handler))
                 .route("/user-submissions", get(user_submissions_handler))
                 .layer(Extension(task_send))
-                .with_state(config.clone()),
+                .with_state(config.clone())
+                .layer(middleware::from_fn_with_state(
+                    config.clone(),
+                    auth_middleware,
+                )),
         )
         .nest("/auth", auth::auth_routes().with_state(config.clone()))
         .fallback_service(ServeDir::new("static"))
         .layer(ServiceBuilder::new().layer(tower_http::cors::CorsLayer::permissive()))
-        .layer(middleware::from_fn_with_state(
-            config.clone(),
-            auth_middleware,
-        ))
         .layer(
             TraceLayer::new_for_http().make_span_with(move |request: &Request<Body>| {
                 tracing::debug_span!(

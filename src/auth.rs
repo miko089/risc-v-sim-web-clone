@@ -23,7 +23,6 @@ pub struct User {
     pub id: i64,
     pub login: String,
     pub name: Option<String>,
-    pub avatar_url: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -204,7 +203,6 @@ pub async fn me_handler(
             id: claims.sub.parse().unwrap_or(0),
             login: claims.login,
             name: claims.name,
-            avatar_url: None,
         };
 
         Ok(Json(AuthResponse { user }))
@@ -229,10 +227,6 @@ pub async fn auth_middleware(
 ) -> Response {
     let path = request.uri().path();
 
-    if path != "/api/submit" && path != "/api/submission" && path != "/api/user-submissions" {
-        return next.run(request).await;
-    }
-
     let token = cookie_jar.get("jwt");
     if let Some(token) = token {
         return match decode::<Claims>(
@@ -241,7 +235,11 @@ pub async fn auth_middleware(
             &Validation::default(),
         ) {
             Ok(token_data) => {
-                request.extensions_mut().insert(token_data.claims);
+                request.extensions_mut().insert(User {
+                    id: token_data.claims.sub.parse().unwrap_or(0),
+                    login: token_data.claims.login,
+                    name: token_data.claims.name,
+                });
                 next.run(request).await
             }
             Err(e) => {
