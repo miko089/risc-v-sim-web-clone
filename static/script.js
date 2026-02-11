@@ -1220,10 +1220,10 @@ class AuthManager {
 
     async checkAuthStatus() {
         try {
-            const response = await fetch('/auth/me');
+            const response = await fetch('/api/me');
             if (response.ok) {
                 const data = await response.json();
-                this.showUserInfo(data.user);
+                this.showUserInfo(data);
             } else {
                 this.showLoginButton();
             }

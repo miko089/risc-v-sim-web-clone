@@ -37,11 +37,6 @@ pub struct AuthQuery {
     state: String,
 }
 
-#[derive(Debug, Serialize)]
-pub struct AuthResponse {
-    user: User,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
     // 'sub' is default in jwt, according to https://datatracker.ietf.org/doc/html/rfc7519#section-4.1.2
@@ -186,37 +181,11 @@ pub async fn callback_handler(
     Ok((jar.add(cookie), Redirect::to("/")))
 }
 
-pub async fn me_handler(
-    State(config): State<Arc<crate::Config>>,
-    jar: CookieJar,
-) -> Result<Json<AuthResponse>, StatusCode> {
-    if let Some(token) = jar.get("jwt") {
-        let token_data = decode::<Claims>(
-            &token.value(),
-            &DecodingKey::from_secret(config.auth_config.jwt_secret.as_ref()),
-            &Validation::default(),
-        )
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
-
-        let claims = token_data.claims;
-        let user = User {
-            id: claims.sub.parse().unwrap_or(0),
-            login: claims.login,
-            name: claims.name,
-        };
-
-        Ok(Json(AuthResponse { user }))
-    } else {
-        Err(StatusCode::UNAUTHORIZED)
-    }
-}
-
 pub fn auth_routes() -> Router<Arc<crate::Config>> {
     Router::new()
         .route("/login", post(login_handler))
         .route("/callback", get(callback_handler))
         .route("/logout", post(logout_handler))
-        .route("/me", get(me_handler))
 }
 
 pub async fn auth_middleware(

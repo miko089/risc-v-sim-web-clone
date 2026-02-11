@@ -193,6 +193,10 @@ async fn user_submissions_handler(
     }
 }
 
+pub async fn me_handler(Extension(user): Extension<User>) -> Result<Json<User>, StatusCode> {
+    Ok(Json(user))
+}
+
 pub async fn run(root_span: tracing::Span, listener: TcpListener, cfg: Config) {
     let (task_send, task_recv) = tokio::sync::mpsc::channel::<SubmissionTask>(100);
     let config = Arc::new(cfg);
@@ -212,6 +216,7 @@ pub async fn run(root_span: tracing::Span, listener: TcpListener, cfg: Config) {
                 .route("/submit", post(submit_handler))
                 .route("/submission", get(submission_handler))
                 .route("/user-submissions", get(user_submissions_handler))
+                .route("/me", get(me_handler))
                 .layer(Extension(task_send))
                 .with_state(config.clone())
                 .layer(middleware::from_fn_with_state(
