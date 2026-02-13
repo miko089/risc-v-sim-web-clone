@@ -53,11 +53,6 @@ pub fn create_auth_config() -> Result<AuthConfig> {
         std::env::var("GITHUB_CLIENT_SECRET").context("GITHUB_CLIENT_SECRET not set")?;
     let jwt_secret = std::env::var("JWT_SECRET").context("JWT_SECRET not set")?;
 
-    tracing::info!(
-        "Creating OAuth client with client_id: {}...",
-        &client_id[..client_id.len().min(8)]
-    );
-
     let auth_url = AuthUrl::new("https://github.com/login/oauth/authorize".to_string())
         .map_err(|e| anyhow!("Invalid auth URL: {}", e))?;
     let token_url = TokenUrl::new("https://github.com/login/oauth/access_token".to_string())
@@ -69,8 +64,6 @@ pub fn create_auth_config() -> Result<AuthConfig> {
         auth_url,
         Some(token_url),
     );
-
-    tracing::info!("OAuth client created successfully");
 
     Ok(AuthConfig {
         oauth_client: client,
@@ -106,12 +99,6 @@ pub async fn oauth_callback_handler(
     Query(query): Query<AuthQuery>,
     jar: CookieJar,
 ) -> Result<(CookieJar, Redirect), StatusCode> {
-    tracing::info!(
-        "Received OAuth callback with code length: {} and state: {}",
-        query.code.len(),
-        query.state
-    );
-
     let code = AuthorizationCode::new(query.code.clone());
 
     let token_response = config
@@ -128,7 +115,6 @@ pub async fn oauth_callback_handler(
     let access_token = token_response.access_token().secret();
 
     let client = reqwest::Client::new();
-    tracing::info!("Fetching user data from GitHub API");
 
     let user_response = client
         .get("https://api.github.com/user")
@@ -141,8 +127,6 @@ pub async fn oauth_callback_handler(
             StatusCode::BAD_REQUEST
         })?;
 
-    tracing::info!("GitHub API response status: {}", user_response.status());
-
     let user_data: serde_json::Value = user_response.json().await.map_err(|e| {
         tracing::error!("Failed to parse GitHub user response: {:?}", e);
         StatusCode::BAD_REQUEST
@@ -151,8 +135,6 @@ pub async fn oauth_callback_handler(
     let user_id = user_data["id"].as_u64().unwrap_or(0).to_string();
     let login = user_data["login"].as_str().unwrap_or("").to_string();
     let name = user_data["name"].as_str().map(|s| s.to_string());
-
-    tracing::info!("Creating JWT for user: {} (ID: {})", login, user_id);
 
     let claims = Claims {
         sub: user_id.clone(),
@@ -175,8 +157,6 @@ pub async fn oauth_callback_handler(
     cookie.set_path("/");
     cookie.set_max_age(Some(time::Duration::hours(24 * 7)));
     cookie.set_http_only(true);
-
-    tracing::info!("Redirecting user to / with auth cookie");
 
     Ok((jar.add(cookie), Redirect::to("/")))
 }
@@ -212,7 +192,7 @@ pub async fn auth_middleware(
                 next.run(request).await
             }
             Err(e) => {
-                tracing::warn!("Invalid JWT token: {:?}", e);
+                tracing::debug!("Invalid JWT token: {:?}", e);
                 (
                     StatusCode::UNAUTHORIZED,
                     Json(serde_json::json!({"error": "Invalid authorization token"})),
@@ -222,7 +202,7 @@ pub async fn auth_middleware(
         };
     }
 
-    tracing::warn!("Unauthorized access attempt to {}", path);
+    tracing::debug!("Unauthorized access attempt to {}", path);
     (
         StatusCode::UNAUTHORIZED,
         Json(serde_json::json!({"error": "Authentication required"})),
