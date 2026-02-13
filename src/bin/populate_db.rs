@@ -66,77 +66,18 @@ async fn main() -> Result<()> {
 }
 
 async fn create_submission_files(uuid: &str, index: usize) -> Result<()> {
-    // TODO: use files instead of hard-coded samples
-
     let submissions_dir =
         env::var("SUBMISSIONS_FOLDER").unwrap_or_else(|_| "submission".to_string());
     let submission_path = format!("{}/{}", submissions_dir, uuid);
 
     tokio::fs::create_dir_all(&submission_path).await?;
 
-    let sample_codes = vec![
-        r#"
-        .text
-        .globl _start
-
-    _start:
-        li x5, 10
-        li x6, 20
-        add x7, x5, x6
-        ebreak"#,
-        r#"
-        .text
-        .globl _start
-
-    _start:
-        li x5, 0
-        li x6, 5
-
-    loop:
-        addi x5, x5, 1
-        bne x5, x6, loop
-        ebreak"#,
-        r#"
-        .text
-        .globl _start
-
-    _start:
-        la x10, data
-        li x11, 42
-        sw x11, 0(x10)
-        lw x12, 0(x10)
-        ebreak
-
-    .data
-    data: .word 0"#,
-        r#"
-        .text
-        .globl _start
-
-    _start:
-        li x5, 0
-        li x6, 1
-        li x7, 10
-
-    fib_loop:
-        add x8, x5, x6
-        mv x5, x6
-        mv x6, x8
-        addi x7, x7, -1
-        bnez x7, fib_loop
-        ebreak"#,
-        r#"
-        .text
-        .globl _start
-
-    _start:
-        li x5, 100
-        li x6, 25
-        sub x7, x5, x6
-        li x8, 3
-        mul x9, x7, x8
-        ebreak"#,
-    ];
+    let mut sample_codes: Vec<&str> = Vec::new();
+    sample_codes.push(&include_str!("../../db_populate_samples/code/1"));
+    sample_codes.push(&include_str!("../../db_populate_samples/code/2"));
+    sample_codes.push(&include_str!("../../db_populate_samples/code/3"));
+    sample_codes.push(&include_str!("../../db_populate_samples/code/4"));
+    sample_codes.push(&include_str!("../../db_populate_samples/code/5"));
 
     let code_index = index % sample_codes.len();
     let assembly_code = sample_codes[code_index];
@@ -154,53 +95,12 @@ async fn create_submission_files(uuid: &str, index: usize) -> Result<()> {
 }
 
 fn create_sample_simulation_result(assembly_code: &str, index: usize) -> String {
-    // TODO: use files instead of hard-coded samples
-
     let ulid = Ulid::new();
     let steps = if index % 3 == 0 {
         vec![
-            serde_json::json!({
-                "instruction": {
-                    "mnemonic": "li",
-                    "obj": {"Li": [5, 10]}
-                },
-                "old_registers": {
-                    "pc": 1342177280,
-                    "storage": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-                },
-                "new_registers": {
-                    "pc": 1342177284,
-                    "storage": [0, 0, 0, 0, 0, 10, 0, 0, 0, 0]
-                }
-            }),
-            serde_json::json!({
-                "instruction": {
-                    "mnemonic": "li",
-                    "obj": {"Li": [6, 20]}
-                },
-                "old_registers": {
-                    "pc": 1342177284,
-                    "storage": [0, 0, 0, 0, 0, 10, 0, 0, 0, 0]
-                },
-                "new_registers": {
-                    "pc": 1342177288,
-                    "storage": [0, 0, 0, 0, 0, 10, 20, 0, 0, 0]
-                }
-            }),
-            serde_json::json!({
-                "instruction": {
-                    "mnemonic": "add",
-                    "obj": {"Add": [7, 5, 6]}
-                },
-                "old_registers": {
-                    "pc": 1342177288,
-                    "storage": [0, 0, 0, 0, 0, 10, 20, 0, 0, 0]
-                },
-                "new_registers": {
-                    "pc": 1342177292,
-                    "storage": [0, 0, 0, 0, 0, 10, 20, 30, 0, 0]
-                }
-            }),
+            serde_json::json!(include!("../../db_populate_samples/results/1")),
+            serde_json::json!(include!("../../db_populate_samples/results/1")),
+            serde_json::json!(include!("../../db_populate_samples/results/1")),
         ]
     } else {
         vec![]
