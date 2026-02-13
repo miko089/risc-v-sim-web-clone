@@ -34,7 +34,6 @@ pub struct AuthConfig {
 #[derive(Debug, Deserialize)]
 pub struct AuthQuery {
     code: String,
-    state: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
