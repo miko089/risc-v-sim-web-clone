@@ -33,7 +33,7 @@ async fn submit_simple() {
         "submit_simple",
         |_| {},
         async |port| {
-            let client = Client::new();
+            let client = reqwest::Client::new();
             let submit_response =
                 submit_program(&client, port, 5, "riscv-samples/src/basic.s").await;
             let submit_status = submit_response.status();
@@ -65,7 +65,7 @@ async fn submit_non_existent() {
         "submit_non_existent",
         |_| {},
         async |port| {
-            let client = Client::new();
+            let client = reqwest::Client::new();
             let fake_submission_id = Ulid::new();
             let response = get_submission(&client, port, fake_submission_id).await;
             assert_eq!(response.status(), reqwest::StatusCode::NOT_FOUND);
@@ -100,7 +100,7 @@ async fn codesize_max_restriction() {
         "codesize_max_restriction",
         |_| {},
         async |port| {
-            let client = Client::new();
+            let client = reqwest::Client::new();
             let submit_response = submit_program(&client, port, 5, "riscv-samples/src/big.s").await;
             let submit_status = submit_response.status();
             let resp_text = match submit_response.text().await {
@@ -123,7 +123,7 @@ async fn ticks_max_restriction() {
         "ticks_max_restriction",
         |_| {},
         async |port| {
-            let client = Client::new();
+            let client = reqwest::Client::new();
             let submit_response =
                 submit_program(&client, port, 100, "riscv-samples/src/basic.s").await;
             let submit_status = submit_response.status();
@@ -142,7 +142,7 @@ async fn ticks_max_restriction() {
 }
 
 async fn make_submission_and_wait_for_success(port: u16, source_file: impl AsRef<Path>) {
-    let client = Client::new();
+    let client = reqwest::Client::new();
 
     let mut source_path = PathBuf::from_iter(["riscv-samples", "src"]);
     source_path.push(source_file.as_ref());

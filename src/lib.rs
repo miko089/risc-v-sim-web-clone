@@ -126,7 +126,7 @@ async fn submit_handler(
         error!("Failed to submit task: {e}");
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({
+            Json(serde_json::json!({
                 "error": format!("{e}"),
             })),
         );
@@ -144,7 +144,7 @@ async fn submit_handler(
 async fn submission_handler(
     State(config): State<Arc<Config>>,
     submission: Query<Submission>,
-) -> (StatusCode, Json<serde_json::Value>) {
+) -> (axum::http::StatusCode, Json<serde_json::Value>) {
     let submission = submission_file(&config.actor_config, submission.ulid);
     let content = match fs::read(submission).await {
         Ok(x) => x,
@@ -239,7 +239,7 @@ pub async fn run(root_span: tracing::Span, listener: TcpListener, cfg: Config) {
             }),
         );
 
-    let (res, _) = join!(axum::serve(listener, router), submission_actor);
+    let (res, _) = join!(axum::serve(listener, router), submission_actor,);
     res.unwrap();
 }
 

@@ -25,6 +25,7 @@ where
 }
 
 pub fn init_test() {
+    // Tests run in parallel, so some might have already created the logger.
     let _ = tracing_subscriber::fmt()
         .with_level(true)
         .with_max_level(Level::DEBUG)
@@ -48,7 +49,7 @@ async fn make_listener() -> (u16, TcpListener) {
     //       reserves the port. Otherwise, the caller's HTTP requests will race
     //       and get a "connection refused" response.
     let address = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
-    let listener = TcpListener::bind(address).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(address).await.unwrap();
     let port = listener.local_addr().unwrap().port();
     info!("Listening on port {port}");
     (port, listener)
@@ -134,6 +135,7 @@ pub async fn submit_program(
         .unwrap()
 }
 
+#[allow(dead_code)]
 pub async fn get_submission(client: &Client, port: u16, submission_id: Ulid) -> Response {
     let request_url = server_url(port).join("api/submission").unwrap();
     let token = generate_test_token(
@@ -152,11 +154,13 @@ pub async fn get_submission(client: &Client, port: u16, submission_id: Ulid) -> 
         .unwrap()
 }
 
+#[allow(dead_code)]
 pub fn server_url(port: u16) -> Url {
     let addr = SocketAddrV4::new(Ipv4Addr::LOCALHOST, port);
     Url::parse(&format!("http://{addr}")).unwrap()
 }
 
+#[allow(dead_code)]
 pub async fn parse_response_json<T>(response: Response) -> T
 where
     T: for<'a> serde::Deserialize<'a>,

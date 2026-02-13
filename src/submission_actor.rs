@@ -62,7 +62,7 @@ async fn future_with_timeout<T>(
 async fn simulate(
     config: &Config,
     ulid: Ulid,
-    source_code: Bytes,
+    source_code: bytes::Bytes,
     ticks: u32,
 ) -> Result<serde_json::Value> {
     let submission_dir = submission_dir(config, ulid);
@@ -136,7 +136,7 @@ async fn submission_task(
             error!("simulation failed: {e:#}");
             (
                 SubmissionStatus::Completed,
-                json!({
+                serde_json::json!({
                     "error": format!("{e:?}"),
                     "ulid": task.ulid,
                     "ticks": task.ticks,
@@ -258,8 +258,8 @@ async fn run_simulator(config: &Config, submission_dir: &Path, ticks: u32) -> Re
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn test_path_utils() {
+    #[test]
+    fn test_path_utils() {
         let config = Config {
             as_binary: "dummy".into(),
             ld_binary: "dummy".into(),
