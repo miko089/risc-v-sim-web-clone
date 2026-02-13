@@ -101,7 +101,7 @@ pub async fn logout_handler(_config: State<Arc<crate::Config>>) -> (CookieJar, R
     (jar.add(cookie), Redirect::to("/"))
 }
 
-pub async fn callback_handler(
+pub async fn oauth_callback_handler(
     State(config): State<Arc<crate::Config>>,
     Query(query): Query<AuthQuery>,
     jar: CookieJar,
@@ -184,7 +184,7 @@ pub async fn callback_handler(
 pub fn auth_routes() -> Router<Arc<crate::Config>> {
     Router::new()
         .route("/login", post(login_handler))
-        .route("/callback", get(callback_handler))
+        .route("/callback", get(oauth_callback_handler))
         .route("/logout", post(logout_handler))
 }
 
