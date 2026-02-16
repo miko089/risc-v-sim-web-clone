@@ -38,7 +38,8 @@ jobs:
           name: traces
           path: ./riscv-samples/traces/*.json
   run-tests:
-    runs-on: krinkin/rv64-toolchain
+    runs-on: ubuntu-24.04
+    container: krinkin/rv64-toolchain
     needs: [capture-traces]
     services:
       mongodb:
