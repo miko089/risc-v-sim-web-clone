@@ -64,12 +64,9 @@ jobs:
         with:
           name: traces
           path: traces
-      - name: Build dockerfile
-        run: |
-          docker build -t meow .
       - name: Run integration tests
         run: |
-          docker run --entrypoint "" --network=host meow cargo test --test "*" --locked -- --show-output
+          cargo test --test "*" --locked --show-output
       - name: Check logs on failure
         if: failure()
         run: docker logs $(docker ps -a -q --filter "ancestor=meow" -n 1)
