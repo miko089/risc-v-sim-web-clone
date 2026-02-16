@@ -54,7 +54,6 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
-      MONGODB_URI: mongodb://localhost:27017
       MONGODB_DB: riscv_sim_test
     steps:
       # Required by the openssl crate
@@ -106,4 +105,5 @@ jobs:
           export SIMULATOR_BINARY=./risc-v-sim/target/debug/risc-v-sim
           export AS_BINARY=riscv64-linux-gnu-as
           export LD_BINARY=riscv64-linux-gnu-ld
+          export MONGODB_URI=mongodb://mongodb:27017
           cargo test --test "*" --locked -- --show-output
