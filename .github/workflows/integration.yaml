@@ -8,8 +8,8 @@ env:
   RUST_BACKTRACE: "1"
   RUST_VERSION: "1.89.0"
 
-jobs:    
-  capture-traces: 
+jobs:
+  capture-traces:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -66,4 +66,7 @@ jobs:
           path: traces
       - name: Run integration tests
         run: |
-          cargo test --test "*" --locked -- --show-output
+          docker run --entrypoint "" --network=host meow cargo test --test "*" --locked -- --show-output
+      - name: Check logs on failure
+        if: failure()
+        run: docker logs $(docker ps -a -q --filter "ancestor=meow" -n 1)
